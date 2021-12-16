@@ -640,9 +640,28 @@ bool processCommand(String cmd)
   if (nme!=NULL)
     val=strtok(NULL,"=");
 
-  //Get rid of the carriage return
-  if (val!=NULL && strlen(val)>0 && val[strlen(val)-1]==13)
+  //Get rid of the carriage return and/or linefeed. Twice because could have both.
+  if (val!=NULL && strlen(val)>0 && (val[strlen(val)-1]==13 || val[strlen(val)-1]==10))
     val[strlen(val)-1]=0; 
+  if (val!=NULL && strlen(val)>0 && (val[strlen(val)-1]==13 || val[strlen(val)-1]==10))
+    val[strlen(val)-1]=0; 
+
+  //do it for the command as well.  Might not even have a value.
+  if (nme!=NULL && strlen(nme)>0 && (nme[strlen(nme)-1]==13 || nme[strlen(nme)-1]==10))
+    nme[strlen(nme)-1]=0; 
+  if (nme!=NULL && strlen(nme)>0 && (nme[strlen(nme)-1]==13 || nme[strlen(nme)-1]==10))
+    nme[strlen(nme)-1]=0; 
+
+  if (settings.debug)
+    {
+    Serial.print("Processing command \"");
+    Serial.print(nme);
+    Serial.println("\"");
+    Serial.print("Length:");
+    Serial.println(strlen(nme));
+    Serial.print("Hex:");
+    Serial.println(nme[0],HEX);
+    }
 
   if (nme==NULL || val==NULL || strlen(nme)==0 || strlen(val)==0)
     {
@@ -775,14 +794,11 @@ void initializeSettings()
 
 void checkForCommand()
   {
-  if (Serial.available())
+  serialEvent();
+  String cmd=getConfigCommand();
+  if (cmd.length()>0)
     {
-    serialEvent();
-    String cmd=getConfigCommand();
-    if (cmd.length()>0)
-      {
-      processCommand(cmd);
-      }
+    processCommand(cmd);
     }
   }
   
