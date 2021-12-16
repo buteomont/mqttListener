@@ -1,6 +1,5 @@
 /*
- * Program to limit the time something can run, such as a pump or
- * air compressor.
+ * Program to sound a buzzer with a pattern assigned to different mqtt messages.
  * By David E. Powell 
  *
  * Subscribes to an MQTT topic and when the target message is received, 
@@ -8,7 +7,7 @@
  * 
  * Configuration is done via serial connection or by MQTT message.
  *  
- * **** to erase the entire flash chip in PlatformIO, open
+ * **** Note to self: To erase the entire flash chip in PlatformIO, open
  * **** a terminal and type "pio run -t erase"
  */ 
 #include <Arduino.h>
