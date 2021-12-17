@@ -40,14 +40,20 @@ typedef struct
   int brokerPort=DEFAULT_MQTT_BROKER_PORT;
   char mqttUsername[USERNAME_SIZE]="";
   char mqttUserPassword[PASSWORD_SIZE]="";
-  char mqttTopic[MQTT_MAX_TOPIC_SIZE]="";
+  char mqttTopic1[MQTT_MAX_TOPIC_SIZE]="";
+  char mqttTopic2[MQTT_MAX_TOPIC_SIZE]="";
+  char mqttTopic3[MQTT_MAX_TOPIC_SIZE]="";
+  char mqttTopic4[MQTT_MAX_TOPIC_SIZE]="";
   char mqttMessage1[MQTT_MAX_MESSAGE_SIZE]="";
   char mqttMessage2[MQTT_MAX_MESSAGE_SIZE]="";
   char mqttMessage3[MQTT_MAX_MESSAGE_SIZE]="";
+  char mqttMessage4[MQTT_MAX_MESSAGE_SIZE]="";
   byte soundPattern1=DEFAULT_SOUND_PATTERN_1;
   byte soundPattern2=DEFAULT_SOUND_PATTERN_2;
   byte soundPattern3=DEFAULT_SOUND_PATTERN_3;
+  byte soundPattern4=DEFAULT_SOUND_PATTERN_4;
   char mqttLWTMessage[MQTT_MAX_MESSAGE_SIZE]="";
+  char commandTopic[MQTT_MAX_TOPIC_SIZE]=DEFAULT_MQTT_TOPIC;
   boolean debug=false;
   char mqttClientId[MQTT_CLIENTID_SIZE]=""; //will be the same across reboots
   } conf;
@@ -103,7 +109,9 @@ void beep(byte pattern)
       digitalWrite(FLASHLED_PORT,FLASHLED_ON);
       if (settings.debug)
         Serial.print(" beep");
-      tone(SOUNDER_PORT,NOTE_PITCH_HZ,NOTE_LENGTH_MS);
+      tone(SOUNDER_PORT,NOTE_PITCH_HZ);
+      delay(NOTE_LENGTH_MS);
+      noTone(SOUNDER_PORT); //tone doesn't block, so we need to do it this way
       digitalWrite(FLASHLED_PORT,FLASHLED_OFF);
       }
     else
@@ -139,16 +147,21 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
   char charbuf[100];
   sprintf(charbuf,"%s",payload);
   const char* response;
-  char settingsResp[400];
+  char settingsResp[1000];
 
   if (settings.debug)
     {
+    Serial.print("========>Topic is \"");
+    Serial.print(reqTopic);
+    Serial.println("\"");
     Serial.print("========>Payload is \"");
     Serial.print(charbuf);
     Serial.println("\".");
     }
 
-  if (strcmp(charbuf,"settings")==0) //special case, send all settings
+  boolean needRestart=false;
+  if (strcmp(charbuf,"settings")==0 &&
+      strcmp(reqTopic,settings.commandTopic)==0) //special case, send all settings
     {
     strcpy(settingsResp,"\nssid=");
     strcat(settingsResp,settings.ssid);
@@ -168,8 +181,17 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     strcat(settingsResp,"userPass=");
     strcat(settingsResp,settings.mqttUserPassword);
     strcat(settingsResp,"\n");
-    strcat(settingsResp,"topic=");
-    strcat(settingsResp,settings.mqttTopic);
+    strcat(settingsResp,"topic1=");
+    strcat(settingsResp,settings.mqttTopic1);
+    strcat(settingsResp,"\n");
+    strcat(settingsResp,"topic2=");
+    strcat(settingsResp,settings.mqttTopic2);
+    strcat(settingsResp,"\n");
+    strcat(settingsResp,"topic3=");
+    strcat(settingsResp,settings.mqttTopic3);
+    strcat(settingsResp,"\n");
+    strcat(settingsResp,"topic4=");
+    strcat(settingsResp,settings.mqttTopic4);
     strcat(settingsResp,"\n");
     strcat(settingsResp,"lwtMessage=");
     strcat(settingsResp,settings.mqttLWTMessage);
@@ -183,6 +205,9 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     strcat(settingsResp,"message3=");
     strcat(settingsResp,settings.mqttMessage3);
     strcat(settingsResp,"\n");
+    strcat(settingsResp,"message4=");
+    strcat(settingsResp,settings.mqttMessage4);
+    strcat(settingsResp,"\n");
     strcat(settingsResp,"soundPattern1=");
     strcat(settingsResp,String(settings.soundPattern1,BIN).c_str());
     strcat(settingsResp,"\n");
@@ -192,8 +217,14 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     strcat(settingsResp,"soundPattern3=");
     strcat(settingsResp,String(settings.soundPattern3,BIN).c_str());
     strcat(settingsResp,"\n");
+    strcat(settingsResp,"soundPattern4=");
+    strcat(settingsResp,String(settings.soundPattern4,BIN).c_str());
+    strcat(settingsResp,"\n");
     strcat(settingsResp,"debug=");
     strcat(settingsResp,settings.debug?"true":"false");
+    strcat(settingsResp,"\n");
+    strcat(settingsResp,"commandTopic=");
+    strcat(settingsResp,settings.commandTopic);
     strcat(settingsResp,"\n");
     strcat(settingsResp,"MQTT client ID=");
     strcat(settingsResp,settings.mqttClientId);
@@ -202,27 +233,43 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     strcat(settingsResp,WiFi.localIP().toString().c_str());
     response=settingsResp;
     }
-  else if (strcmp(charbuf,settings.mqttMessage1)==0)
+  else if (strlen(settings.mqttMessage1)>0 
+      && strcmp(charbuf,settings.mqttMessage1)==0
+      && strcmp(reqTopic,settings.mqttTopic1)==0)
     {
     messageWasReceived=true;
     beep(settings.soundPattern1);
     response="OK";
     }
-  else if (strlen(settings.mqttMessage2)>0 && strcmp(charbuf,settings.mqttMessage2)==0)
+  else if (strlen(settings.mqttMessage2)>0 
+      && strcmp(charbuf,settings.mqttMessage2)==0
+      && strcmp(reqTopic,settings.mqttTopic2)==0)
     {
     messageWasReceived=true;
     beep(settings.soundPattern2);
     response="OK";
     }
-  else if (strlen(settings.mqttMessage3)>0 && strcmp(charbuf,settings.mqttMessage3)==0)
+  else if (strlen(settings.mqttMessage3)>0 
+      && strcmp(charbuf,settings.mqttMessage3)==0
+      && strcmp(reqTopic,settings.mqttTopic3)==0)
     {
     messageWasReceived=true;
     beep(settings.soundPattern3);      
     response="OK";
     }
-  else if (processCommand(charbuf))
+  else if (strlen(settings.mqttMessage4)>0 
+      && strcmp(charbuf,settings.mqttMessage4)==0
+      && strcmp(reqTopic,settings.mqttTopic4)==0)
     {
+    messageWasReceived=true;
+    beep(settings.soundPattern4);      
     response="OK";
+    }
+  else if (strcmp(reqTopic,settings.commandTopic)==0 &&
+          processCommand(charbuf))
+    {
+    response="OK, restarting";
+    needRestart=true;
     }
   else
     {
@@ -233,12 +280,18 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
 
   //prepare the response topic
   char topic[MQTT_MAX_TOPIC_SIZE];
-  strcpy(topic,settings.mqttTopic);
+  strcpy(topic,settings.mqttTopic1);
   strcat(topic,"/");
   strcat(topic,charbuf); //the incoming command becomes the topic suffix
 
   if (!publish(topic,response,false)) //do not retain
     Serial.println("************ Failure when publishing status response!");
+
+  if (needRestart)
+    {
+    delay(1000);
+    ESP.restart();
+    }
   }
 
 boolean sendMessage(char* topic, char* value)
@@ -255,7 +308,7 @@ boolean sendMessage(char* topic, char* value)
 //    boolean success=false; //only for the incoming topic and value
 
     //publish the radio strength reading while we're at it
-    strcpy(topicBuf,settings.mqttTopic);
+    strcpy(topicBuf,settings.mqttTopic1);
     strcat(topicBuf,MQTT_TOPIC_RSSI);
     sprintf(reading,"%d",WiFi.RSSI()); 
     success=publish(topicBuf,reading,true); //retain
@@ -263,7 +316,7 @@ boolean sendMessage(char* topic, char* value)
       Serial.println("************ Failed publishing rssi!");
     
     //publish the message
-    strcpy(topicBuf,settings.mqttTopic);
+    strcpy(topicBuf,settings.mqttTopic1);
     strcat(topicBuf,topic);
     success=publish(topicBuf,value,true); //retain
     if (!success)
@@ -354,7 +407,8 @@ void setup()
       settings.brokerPort>65535 ||
       strlen(settings.mqttMessage1)>MQTT_MAX_MESSAGE_SIZE ||
       strlen(settings.mqttMessage2)>MQTT_MAX_MESSAGE_SIZE ||
-      strlen(settings.mqttMessage3)>MQTT_MAX_MESSAGE_SIZE)
+      strlen(settings.mqttMessage3)>MQTT_MAX_MESSAGE_SIZE ||
+      strlen(settings.mqttMessage4)>MQTT_MAX_MESSAGE_SIZE)
     {
     Serial.println("\nSettings in eeprom failed sanity check, initializing.");
     initializeSettings(); //must be a new board or flash was erased
@@ -374,6 +428,9 @@ void setup()
     {
     otaSetup(); //initialize the OTA stuff
     }
+  else
+    digitalWrite(LED_BUILTIN,LED_OFF);
+
   }
 
 void loop()
@@ -467,9 +524,12 @@ boolean connectToWiFi()
       ESP.restart(); //reboot
       }
     }
+  else
+    digitalWrite(LED_BUILTIN,LED_OFF);
+
   if (WiFi.status() == WL_CONNECTED)
     {
-    reconnect(); // go ahead and connect to the MQTT broker
+    mqttReconnect(); // go ahead and connect to the MQTT broker
     }
   return retval;
   }
@@ -489,20 +549,21 @@ void showSub(char* topic, bool subgood)
 /*
  * Reconnect to the MQTT broker
  */
-void reconnect() 
+void mqttReconnect() 
   {
   // Loop until we're reconnected
-  if (!mqttClient.connected()) 
+  while (!mqttClient.connected()) 
     {      
     Serial.print("Attempting MQTT connection...");
 
-    mqttClient.setBufferSize(500); //default (256) isn't big enough
+    mqttClient.setBufferSize(1000); //default (256) isn't big enough
     mqttClient.setServer(settings.brokerAddress, settings.brokerPort);
     mqttClient.setCallback(incomingMqttHandler);
     
     // Attempt to connect
     char willTopic[MQTT_MAX_TOPIC_SIZE]="";
-    strcpy(willTopic,settings.mqttTopic);
+    strcpy(willTopic,settings.commandTopic);
+    strcat(willTopic,"/");
     strcat(willTopic,MQTT_TOPIC_STATUS);
 
 
@@ -517,17 +578,59 @@ void reconnect()
       Serial.println("connected to MQTT broker.");
 
       //resubscribe to the incoming message topic
-      char topic[MQTT_MAX_TOPIC_SIZE];
-      strcpy(topic,settings.mqttTopic);
-//      strcat(topic,MQTT_TOPIC_COMMAND_REQUEST);
       if (settings.debug)
         {
         Serial.print("Subscribing to topic \"");
-        Serial.print(topic);
+        Serial.print(settings.mqttTopic1);
         Serial.println("\"");
         }
-      bool subgood=mqttClient.subscribe(topic);
-      showSub(topic,subgood);
+      bool subgood=mqttClient.subscribe(settings.mqttTopic1);
+      showSub(settings.mqttTopic1,subgood);
+
+      if (settings.debug)
+        {
+        Serial.print("Subscribing to topic \"");
+        Serial.print(settings.commandTopic);
+        Serial.println("\"");
+        }
+      subgood=mqttClient.subscribe(settings.commandTopic);
+      showSub(settings.commandTopic,subgood);
+
+      if (strlen(settings.mqttTopic2)>0)
+        {
+        if (settings.debug)
+          {
+          Serial.print("Subscribing to topic \"");
+          Serial.print(settings.mqttTopic2);
+          Serial.println("\"");
+          }
+        bool subgood=mqttClient.subscribe(settings.mqttTopic2);
+        showSub(settings.mqttTopic2,subgood);
+        }
+
+      if (strlen(settings.mqttTopic3)>0)
+        {
+        if (settings.debug)
+          {
+          Serial.print("Subscribing to topic \"");
+          Serial.print(settings.mqttTopic3);
+          Serial.println("\"");
+          }
+        bool subgood=mqttClient.subscribe(settings.mqttTopic3);
+        showSub(settings.mqttTopic3,subgood);
+        }
+
+      if (strlen(settings.mqttTopic4)>0)
+        {
+        if (settings.debug)
+          {
+          Serial.print("Subscribing to topic \"");
+          Serial.print(settings.mqttTopic4);
+          Serial.println("\"");
+          }
+        bool subgood=mqttClient.subscribe(settings.mqttTopic4);
+        showSub(settings.mqttTopic4,subgood);
+        }
       }
     else 
       {
@@ -580,29 +683,47 @@ void showSettings()
   Serial.print("userPass=<user password for MQTT broker> (");
   Serial.print(settings.mqttUserPassword);
   Serial.println(")");
-  Serial.print("topic=<MQTT topic for which to subscribe> (");
-  Serial.print(settings.mqttTopic);
+  Serial.print("topic1=<MQTT topic for which to subscribe> (");
+  Serial.print(settings.mqttTopic1);
   Serial.println(")");
-  Serial.print("message1=<a message upon which to act> (");
+  Serial.print("message1=<a message for topic 1> (");
   Serial.print(settings.mqttMessage1);
-  Serial.println(")");
-  Serial.print("message2=<another message upon which to act> (");
-  Serial.print(settings.mqttMessage2);
-  Serial.println(")");
-  Serial.print("message3=<a third message upon which to act> (");
-  Serial.print(settings.mqttMessage3);
   Serial.println(")");
   Serial.print("soundPattern1=<an 8-bit pattern describing the sound pattern when message1 is received> (");
   Serial.print(String(settings.soundPattern1,BIN));
   Serial.println(")");
+  Serial.print("topic2=<MQTT topic for which to subscribe> (");
+  Serial.print(settings.mqttTopic2);
+  Serial.println(")");
+  Serial.print("message2=<a message for topic 2> (");
+  Serial.print(settings.mqttMessage2);
+  Serial.println(")");
   Serial.print("soundPattern2=<an 8-bit pattern describing the sound pattern when message2 is received> (");
   Serial.print(String(settings.soundPattern2,BIN));
+  Serial.println(")");
+  Serial.print("topic3=<MQTT topic for which to subscribe> (");
+  Serial.print(settings.mqttTopic3);
+  Serial.println(")");
+  Serial.print("message3=<a message for topic 3> (");
+  Serial.print(settings.mqttMessage3);
   Serial.println(")");
   Serial.print("soundPattern3=<an 8-bit pattern describing the sound pattern when message3 is received> (");
   Serial.print(String(settings.soundPattern3,BIN));
   Serial.println(")");
+  Serial.print("topic4=<MQTT topic for which to subscribe> (");
+  Serial.print(settings.mqttTopic4);
+  Serial.println(")");
+  Serial.print("message4=<a message for topic 4> (");
+  Serial.print(settings.mqttMessage4);
+  Serial.println(")");
+  Serial.print("soundPattern4=<an 8-bit pattern describing the sound pattern when message4 is received> (");
+  Serial.print(String(settings.soundPattern4,BIN));
+  Serial.println(")");
   Serial.print("lwtMessage=<status message to send when power is removed> (");
   Serial.print(settings.mqttLWTMessage);
+  Serial.println(")");
+  Serial.print("commandTopic=<mqtt message for commands to this device> (");
+  Serial.print(settings.commandTopic);
   Serial.println(")");
   Serial.print("debug=<print debug messages to serial port> (");
   Serial.print(settings.debug?"true":"false");
@@ -703,9 +824,24 @@ bool processCommand(String cmd)
     strcpy(settings.mqttLWTMessage,val);
     saveSettings();
     }
-  else if (strcmp(nme,"topic")==0)
+  else if (strcmp(nme,"topic1")==0)
     {
-    strcpy(settings.mqttTopic,val);
+    strcpy(settings.mqttTopic1,val);
+    saveSettings();
+    }
+  else if (strcmp(nme,"topic2")==0)
+    {
+    strcpy(settings.mqttTopic2,val);
+    saveSettings();
+    }
+  else if (strcmp(nme,"topic3")==0)
+    {
+    strcpy(settings.mqttTopic3,val);
+    saveSettings();
+    }
+  else if (strcmp(nme,"topic4")==0)
+    {
+    strcpy(settings.mqttTopic4,val);
     saveSettings();
     }
   else if (strcmp(nme,"message1")==0)
@@ -723,6 +859,11 @@ bool processCommand(String cmd)
     strcpy(settings.mqttMessage3,val);
     saveSettings();
     }
+  else if (strcmp(nme,"message4")==0)
+    {
+    strcpy(settings.mqttMessage4,val);
+    saveSettings();
+    }
   else if (strcmp(nme,"soundPattern1")==0)
     {
     settings.soundPattern1=(byte)strtoul(val, (char**) NULL, 2);
@@ -738,9 +879,19 @@ bool processCommand(String cmd)
     settings.soundPattern3=(byte)strtoul(val, (char**) NULL, 2);
     saveSettings();
     }
+  else if (strcmp(nme,"soundPattern4")==0)
+    {
+    settings.soundPattern4=(byte)strtoul(val, (char**) NULL, 2);
+    saveSettings();
+    }
   else if ((strcmp(nme,"resetmqttid")==0)&& (strcmp(val,"yes")==0))
     {
     generateMqttClientId(settings.mqttClientId);
+    saveSettings();
+    }
+  else if (strcmp(nme,"commandTopic")==0)
+    {
+    strcpy(settings.commandTopic,val);
     saveSettings();
     }
   else if (strcmp(nme,"debug")==0)
@@ -781,12 +932,18 @@ void initializeSettings()
   strcpy(settings.mqttMessage1,"");
   strcpy(settings.mqttMessage2,"");
   strcpy(settings.mqttMessage3,"");
+  strcpy(settings.mqttMessage4,"");
   settings.soundPattern1=DEFAULT_SOUND_PATTERN_1;
   settings.soundPattern2=DEFAULT_SOUND_PATTERN_2;
   settings.soundPattern3=DEFAULT_SOUND_PATTERN_3;
-  strcpy(settings.mqttTopic,DEFAULT_MQTT_TOPIC);
+  settings.soundPattern4=DEFAULT_SOUND_PATTERN_4;
+  strcpy(settings.mqttTopic1,DEFAULT_MQTT_TOPIC);
+  strcpy(settings.mqttTopic2,"");
+  strcpy(settings.mqttTopic3,"");
+  strcpy(settings.mqttTopic4,"");
   strcpy(settings.mqttUsername,"");
   strcpy(settings.mqttUserPassword,"");
+  strcpy(settings.commandTopic,DEFAULT_MQTT_TOPIC);
   generateMqttClientId(settings.mqttClientId);
   settings.debug=false;
   saveSettings();
@@ -835,11 +992,22 @@ boolean saveSettings()
     strlen(settings.mqttLWTMessage)>0 &&
     strlen(settings.mqttLWTMessage)<MQTT_MAX_MESSAGE_SIZE &&
     strlen(settings.mqttMessage1)>0 &&
-    settings.soundPattern1>0 &&
-    strlen(settings.mqttTopic)>0 &&
-    strlen(settings.mqttTopic)<MQTT_MAX_TOPIC_SIZE &&
-    settings.brokerPort>0 &&
-    settings.brokerPort<65535)
+    strlen(settings.mqttMessage1)<MQTT_MAX_MESSAGE_SIZE &&
+    strlen(settings.mqttMessage2)<MQTT_MAX_MESSAGE_SIZE &&
+    strlen(settings.mqttMessage3)<MQTT_MAX_MESSAGE_SIZE &&
+    strlen(settings.mqttMessage4)<MQTT_MAX_MESSAGE_SIZE &&
+    settings.soundPattern1>0 && settings.soundPattern1<256 &&
+    settings.soundPattern2>0 && settings.soundPattern2<256 &&
+    settings.soundPattern3>0 && settings.soundPattern3<256 &&
+    settings.soundPattern4>0 && settings.soundPattern4<256 &&
+    strlen(settings.mqttTopic1)>0 &&
+    strlen(settings.mqttTopic1)<MQTT_MAX_TOPIC_SIZE &&
+    strlen(settings.mqttTopic2)<MQTT_MAX_TOPIC_SIZE &&
+    strlen(settings.mqttTopic3)<MQTT_MAX_TOPIC_SIZE &&
+    strlen(settings.mqttTopic4)<MQTT_MAX_TOPIC_SIZE &&
+    strlen(settings.commandTopic)>0 &&
+    strlen(settings.commandTopic)<MQTT_MAX_TOPIC_SIZE &&
+    settings.brokerPort>0 && settings.brokerPort<65535)
     {
     Serial.println("Settings deemed complete");
     settings.validConfig=VALID_SETTINGS_FLAG;

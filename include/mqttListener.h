@@ -4,7 +4,7 @@
   #define SOUNDER_PORT 1
 #else
   #define FLASHLED_PORT LED_BUILTIN
-  #define SOUNDER_PORT D1
+  #define SOUNDER_PORT D2
 #endif
 
 #define LED_ON LOW
@@ -22,15 +22,16 @@
 
 #define MQTT_CLIENTID_SIZE 25
 #define DEFAULT_MQTT_BROKER_PORT 1883
-#define MQTT_MAX_TOPIC_SIZE 50
+#define MQTT_MAX_TOPIC_SIZE 100
 #define MQTT_MAX_MESSAGE_SIZE 15
-#define DEFAULT_MQTT_TOPIC "esp8266/mqttListener/"
+#define DEFAULT_MQTT_TOPIC "esp8266/mqttListener"
 #define MQTT_CLIENT_ID_ROOT "mqttListener"
 #define MQTT_TOPIC_RSSI "rssi"
 #define MQTT_TOPIC_STATUS "status"
-#define DEFAULT_SOUND_PATTERN_1 B11000000
-#define DEFAULT_SOUND_PATTERN_2 B11001100
-#define DEFAULT_SOUND_PATTERN_3 B10101010
+#define DEFAULT_SOUND_PATTERN_1 B10100000
+#define DEFAULT_SOUND_PATTERN_2 B11011000
+#define DEFAULT_SOUND_PATTERN_3 B11101110
+#define DEFAULT_SOUND_PATTERN_4 B11111111
 #define DEFAULT_MQTT_LWT_MESSAGE "stopped"
 #define MQTT_TOPIC_COMMAND_REQUEST "command"
 #define NOTE_LENGTH_MS 250
@@ -44,7 +45,7 @@ bool processCommand(String cmd);
 void checkForCommand();
 bool connectToWiFi();
 void showSettings();
-void reconnect(); 
+void mqttReconnect(); 
 void showSub(char* topic, bool subgood);
 void initializeSettings();
 void loadSettings();
