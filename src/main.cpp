@@ -56,6 +56,7 @@ typedef struct
   char commandTopic[MQTT_MAX_TOPIC_SIZE]=DEFAULT_MQTT_TOPIC;
   boolean debug=false;
   char mqttClientId[MQTT_CLIENTID_SIZE]=""; //will be the same across reboots
+  char hostName[HOSTNAME_SIZE]="";
   } conf;
 
 conf settings; //all settings in one struct makes it easier to store in EEPROM
@@ -226,10 +227,20 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     strcat(settingsResp,"commandTopic=");
     strcat(settingsResp,settings.commandTopic);
     strcat(settingsResp,"\n");
+    strcat(settingsResp,"hostName=");
+    strcat(settingsResp,settings.hostName);
+    strcat(settingsResp,"\n");
     strcat(settingsResp,"MQTT client ID=");
     strcat(settingsResp,settings.mqttClientId);
     strcat(settingsResp,"\n");
     strcat(settingsResp,"IP Address=");
+    strcat(settingsResp,WiFi.localIP().toString().c_str());
+    response=settingsResp;
+    }
+  else if (strcmp(charbuf,"status")==0 &&
+      strcmp(reqTopic,settings.commandTopic)==0) //report that we're alive
+    {
+    strcpy(settingsResp,"Ready at ");
     strcat(settingsResp,WiFi.localIP().toString().c_str());
     response=settingsResp;
     }
@@ -280,7 +291,7 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
 
   //prepare the response topic
   char topic[MQTT_MAX_TOPIC_SIZE];
-  strcpy(topic,settings.mqttTopic1);
+  strcpy(topic,reqTopic);
   strcat(topic,"/");
   strcat(topic,charbuf); //the incoming command becomes the topic suffix
 
@@ -408,7 +419,8 @@ void setup()
       strlen(settings.mqttMessage1)>MQTT_MAX_MESSAGE_SIZE ||
       strlen(settings.mqttMessage2)>MQTT_MAX_MESSAGE_SIZE ||
       strlen(settings.mqttMessage3)>MQTT_MAX_MESSAGE_SIZE ||
-      strlen(settings.mqttMessage4)>MQTT_MAX_MESSAGE_SIZE)
+      strlen(settings.mqttMessage4)>MQTT_MAX_MESSAGE_SIZE ||
+      strlen(settings.hostName)>HOSTNAME_SIZE)
     {
     Serial.println("\nSettings in eeprom failed sanity check, initializing.");
     initializeSettings(); //must be a new board or flash was erased
@@ -477,6 +489,10 @@ boolean connectToWiFi()
       }
 
     WiFi.mode(WIFI_STA); //station mode, we are only a client in the wifi world
+    
+    if (strlen(settings.hostName)>0)
+      WiFi.hostname(settings.hostName); //else use the default
+
     WiFi.begin(settings.ssid, settings.wifiPassword);
 
     bool ledLit=true; //blink the LED when attempting to connect
@@ -551,9 +567,18 @@ void showSub(char* topic, bool subgood)
  */
 void mqttReconnect() 
   {
+  bool ledLit=true; //blink the LED when attempting to connect
+  digitalWrite(LED_BUILTIN,LED_ON);
+  
   // Loop until we're reconnected
   while (!mqttClient.connected()) 
-    {      
+    {  
+    if (ledLit)
+      digitalWrite(LED_BUILTIN,LED_OFF);
+    else
+      digitalWrite(LED_BUILTIN,LED_ON);
+    ledLit=!ledLit;
+
     Serial.print("Attempting MQTT connection...");
 
     mqttClient.setBufferSize(1000); //default (256) isn't big enough
@@ -631,6 +656,7 @@ void mqttReconnect()
         bool subgood=mqttClient.subscribe(settings.mqttTopic4);
         showSub(settings.mqttTopic4,subgood);
         }
+      digitalWrite(LED_BUILTIN,LED_ON);
       }
     else 
       {
@@ -725,6 +751,9 @@ void showSettings()
   Serial.print("commandTopic=<mqtt message for commands to this device> (");
   Serial.print(settings.commandTopic);
   Serial.println(")");
+  Serial.print("hostName=<network name for this device> (");
+  Serial.print(settings.hostName);
+  Serial.println(")");
   Serial.print("debug=<print debug messages to serial port> (");
   Serial.print(settings.debug?"true":"false");
   Serial.println(")");
@@ -761,6 +790,8 @@ bool processCommand(String cmd)
   if (nme!=NULL)
     val=strtok(NULL,"=");
 
+  char zero[]=""; //zero length string
+
   //Get rid of the carriage return and/or linefeed. Twice because could have both.
   if (val!=NULL && strlen(val)>0 && (val[strlen(val)-1]==13 || val[strlen(val)-1]==10))
     val[strlen(val)-1]=0; 
@@ -782,9 +813,15 @@ bool processCommand(String cmd)
     Serial.println(strlen(nme));
     Serial.print("Hex:");
     Serial.println(nme[0],HEX);
+    Serial.print("Value is \"");
+    Serial.print(val);
+    Serial.println("\n");
     }
 
-  if (nme==NULL || val==NULL || strlen(nme)==0 || strlen(val)==0)
+  if (val==NULL)
+    val=zero;
+
+  if (nme==NULL || val==NULL || strlen(nme)==0) //empty string is a valid val value
     {
     showSettings();
     return false;   //not a valid command, or it's missing
@@ -894,6 +931,11 @@ bool processCommand(String cmd)
     strcpy(settings.commandTopic,val);
     saveSettings();
     }
+  else if (strcmp(nme,"hostName")==0)
+    {
+    strcpy(settings.hostName,val);
+    saveSettings();
+    }
   else if (strcmp(nme,"debug")==0)
     {
     settings.debug=strcmp(val,"false")==0?false:true;
@@ -946,6 +988,7 @@ void initializeSettings()
   strcpy(settings.commandTopic,DEFAULT_MQTT_TOPIC);
   generateMqttClientId(settings.mqttClientId);
   settings.debug=false;
+  strcpy(settings.hostName,"");
   saveSettings();
   }
 
