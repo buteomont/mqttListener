@@ -33,10 +33,16 @@
 #define DEFAULT_SOUND_PATTERN_2 B11011000
 #define DEFAULT_SOUND_PATTERN_3 B11101110
 #define DEFAULT_SOUND_PATTERN_4 B11111111
+#define TONAL_SOUND_PATTERN_1 "12300456"
+#define TONAL_SOUND_PATTERN_2 "604020406"
+#define TONAL_SOUND_PATTERN_3 "908070605"
+#define TONAL_SOUND_PATTERN_4 "91919191"
+#define TONAL_MAX_PATTERN_LENGTH 10
 #define DEFAULT_MQTT_LWT_MESSAGE "stopped"
 #define MQTT_TOPIC_COMMAND_REQUEST "command"
-#define NOTE_LENGTH_MS 250
+#define NOTE_LENGTH_MS 100
 #define NOTE_PITCH_HZ 2048
+#define REPEAT_LIMIT_MS 5000  //won't process repeated messages unless this much time between them
 
 
 //prototypes
@@ -55,4 +61,20 @@ void serialEvent();
 void setup(); 
 void loop();
 
-
+//constants
+int notePitchHz[]= 
+  {
+  0,    //silence
+  1760, //A   
+  1865, //A#
+  1976, //B
+  2093, //C
+  2217, //C#
+  2349, //D
+  2489, //D#
+  2637, //E
+  2794, //F
+  2960, //F#
+  3136, //G
+  3322  //G#
+  };
