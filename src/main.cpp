@@ -34,33 +34,30 @@ PubSubClient mqttClient(wifiClient);
 typedef struct 
   {
   unsigned int validConfig=0; 
-  char ssid[SSID_SIZE] = "";
-  char wifiPassword[PASSWORD_SIZE] = "";
-  char brokerAddress[ADDRESS_SIZE]="";
+  char ssid[SSID_SIZE+1] = "";
+  char wifiPassword[PASSWORD_SIZE+1] = "";
+  char brokerAddress[ADDRESS_SIZE+1]="";
   int brokerPort=DEFAULT_MQTT_BROKER_PORT;
-  char mqttUsername[USERNAME_SIZE]="";
-  char mqttUserPassword[PASSWORD_SIZE]="";
-  char mqttTopic1[MQTT_MAX_TOPIC_SIZE]="";
-  char mqttTopic2[MQTT_MAX_TOPIC_SIZE]="";
-  char mqttTopic3[MQTT_MAX_TOPIC_SIZE]="";
-  char mqttTopic4[MQTT_MAX_TOPIC_SIZE]="";
-  char mqttMessage1[MQTT_MAX_MESSAGE_SIZE]="";
-  char mqttMessage2[MQTT_MAX_MESSAGE_SIZE]="";
-  char mqttMessage3[MQTT_MAX_MESSAGE_SIZE]="";
-  char mqttMessage4[MQTT_MAX_MESSAGE_SIZE]="";
-  // byte soundPattern1=DEFAULT_SOUND_PATTERN_1;
-  // byte soundPattern2=DEFAULT_SOUND_PATTERN_2;
-  // byte soundPattern3=DEFAULT_SOUND_PATTERN_3;
-  // byte soundPattern4=DEFAULT_SOUND_PATTERN_4;
-  char soundPattern1[TONAL_MAX_PATTERN_LENGTH]=TONAL_SOUND_PATTERN_1;
-  char soundPattern2[TONAL_MAX_PATTERN_LENGTH]=TONAL_SOUND_PATTERN_2;
-  char soundPattern3[TONAL_MAX_PATTERN_LENGTH]=TONAL_SOUND_PATTERN_3;
-  char soundPattern4[TONAL_MAX_PATTERN_LENGTH]=TONAL_SOUND_PATTERN_4;
-  char mqttLWTMessage[MQTT_MAX_MESSAGE_SIZE]="";
-  char commandTopic[MQTT_MAX_TOPIC_SIZE]=DEFAULT_MQTT_TOPIC;
+  char mqttUsername[USERNAME_SIZE+1]="";
+  char mqttUserPassword[PASSWORD_SIZE+1]="";
+  char mqttTopic1[MQTT_MAX_TOPIC_SIZE+1]="";
+  char mqttTopic2[MQTT_MAX_TOPIC_SIZE+1]="";
+  char mqttTopic3[MQTT_MAX_TOPIC_SIZE+1]="";
+  char mqttTopic4[MQTT_MAX_TOPIC_SIZE+1]="";
+  char mqttMessage1[MQTT_MAX_MESSAGE_SIZE+1]="";
+  char mqttMessage2[MQTT_MAX_MESSAGE_SIZE+1]="";
+  char mqttMessage3[MQTT_MAX_MESSAGE_SIZE+1]="";
+  char mqttMessage4[MQTT_MAX_MESSAGE_SIZE+1]="";
+  char soundPattern1[TONE_MAX_PATTERN_LENGTH+1]=TONE_SOUND_PATTERN_1;
+  char soundPattern2[TONE_MAX_PATTERN_LENGTH+1]=TONE_SOUND_PATTERN_2;
+  char soundPattern3[TONE_MAX_PATTERN_LENGTH+1]=TONE_SOUND_PATTERN_3;
+  char soundPattern4[TONE_MAX_PATTERN_LENGTH+1]=TONE_SOUND_PATTERN_4;
+  char mqttLWTMessage[MQTT_MAX_MESSAGE_SIZE+1]="";
+  char commandTopic[MQTT_MAX_TOPIC_SIZE+1]=DEFAULT_MQTT_TOPIC;
   boolean debug=false;
-  char mqttClientId[MQTT_CLIENTID_SIZE]=""; //will be the same across reboots
-  char hostName[HOSTNAME_SIZE]="";
+  char mqttClientId[MQTT_CLIENTID_SIZE+1]=""; //will be the same across reboots
+  unsigned int noteLengthMs=DEFAULT_NOTE_LENGTH_MS;
+  int noteOctave=DEFAULT_NOTE_OCTAVE; //can be 0 though 8
   } conf;
 
 conf settings; //all settings in one struct makes it easier to store in EEPROM
@@ -100,39 +97,10 @@ boolean publish(char* topic, const char* msg, boolean retain)
   return mqttClient.publish(topic,msg,retain); 
   }
 
-// void binaryBeep(byte pattern)
-//   {
-//   if (settings.debug)
-//     {
-//     Serial.print("Beeping ");
-//     Serial.println(String(pattern,BIN));
-//     }
-//   for (int i=7;i>=0;i--)
-//     {
-//     if (bitRead(pattern,i))
-//       {
-//       digitalWrite(FLASHLED_PORT,FLASHLED_ON);
-//       if (settings.debug)
-//         Serial.print(" beep");
-//       tone(SOUNDER_PORT,NOTE_PITCH_HZ);
-//       delay(NOTE_LENGTH_MS);
-//       noTone(SOUNDER_PORT); //tone doesn't block, so we need to do it this way
-//       digitalWrite(FLASHLED_PORT,FLASHLED_OFF);
-//       }
-//     else
-//       {
-//       if (settings.debug)
-//         Serial.print(" (quiet)");
-//       delay(NOTE_LENGTH_MS);
-//       }
-//     delay(NOTE_LENGTH_MS/2);
-//     }
-//   if (settings.debug)
-//     Serial.println(".");
-//   }
 
 void beep(const char* pattern)
   {
+  char* endPtr; //needed for strtol function, not used in code
   int patLen=(int)strlen(pattern);
   if (settings.debug)
     {
@@ -146,17 +114,17 @@ void beep(const char* pattern)
     {
     char tmp[2]="\0";
     strncpy(tmp,&pattern[i],1);
-    int noteIndex=atoi(tmp);
+    int noteIndex=(int)strtol(tmp,&endPtr,16);
     if (noteIndex>0 && noteIndex<=12)
       {
       digitalWrite(FLASHLED_PORT,FLASHLED_ON);
       if (settings.debug)
         {
-        Serial.print(noteIndex);
+        Serial.print(noteIndex, HEX);
         Serial.print(" ");
         }
-      tone(SOUNDER_PORT,notePitchHz[noteIndex]);
-      delay(NOTE_LENGTH_MS);
+      tone(SOUNDER_PORT,notePitchHz[noteIndex][settings.noteOctave]);
+      delay(settings.noteLengthMs);
       noTone(SOUNDER_PORT); //tone doesn't block, so we need to do it this way
       digitalWrite(FLASHLED_PORT,FLASHLED_OFF);
       }
@@ -164,9 +132,9 @@ void beep(const char* pattern)
       {
       if (settings.debug)
         Serial.print(". ");
-      delay(NOTE_LENGTH_MS);
+      delay(settings.noteLengthMs);
       }
-    delay(NOTE_LENGTH_MS/2);
+    delay(settings.noteLengthMs/2);
     }
   if (settings.debug)
     Serial.println("");
@@ -186,10 +154,10 @@ void beep(const char* pattern)
  */
 void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length) 
   {
-  static long noRepeat1=millis(); //these will be set to the current uptime counter plus 5 seconds
-  static long noRepeat2=millis();
-  static long noRepeat3=millis();
-  static long noRepeat4=millis();
+  static unsigned long noRepeat1=millis(); //these will be set to the current uptime counter plus 
+  static unsigned long noRepeat2=millis();
+  static unsigned long noRepeat3=millis();
+  static unsigned long noRepeat4=millis();
 
   if (settings.debug)
     {
@@ -278,8 +246,11 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     strcat(settingsResp,"commandTopic=");
     strcat(settingsResp,settings.commandTopic);
     strcat(settingsResp,"\n");
-    strcat(settingsResp,"hostName=");
-    strcat(settingsResp,settings.hostName);
+    strcat(settingsResp,"noteLengthMs=");
+    strcat(settingsResp,String(settings.noteLengthMs).c_str());
+    strcat(settingsResp,"\n");
+    strcat(settingsResp,"noteOctave=");
+    strcat(settingsResp,String(settings.noteOctave).c_str());
     strcat(settingsResp,"\n");
     strcat(settingsResp,"MQTT client ID=");
     strcat(settingsResp,settings.mqttClientId);
@@ -294,7 +265,7 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     strcpy(settingsResp,"Ready at ");
     strcat(settingsResp,WiFi.localIP().toString().c_str());
     response=settingsResp;
-    }
+    }   //check for beep requests
   else if (strlen(settings.mqttMessage1)>0 
       && strcmp(charbuf,settings.mqttMessage1)==0
       && strcmp(reqTopic,settings.mqttTopic1)==0)
@@ -479,7 +450,9 @@ void setup()
       strlen(settings.mqttMessage2)>MQTT_MAX_MESSAGE_SIZE ||
       strlen(settings.mqttMessage3)>MQTT_MAX_MESSAGE_SIZE ||
       strlen(settings.mqttMessage4)>MQTT_MAX_MESSAGE_SIZE ||
-      strlen(settings.hostName)>HOSTNAME_SIZE)
+      settings.noteLengthMs>10000  ||
+      settings.noteOctave>8 || 
+      settings.noteOctave<0)
     {
     Serial.println("\nSettings in eeprom failed sanity check, initializing.");
     initializeSettings(); //must be a new board or flash was erased
@@ -501,12 +474,15 @@ void setup()
     }
   else
     digitalWrite(LED_BUILTIN,LED_OFF);
-
   }
 
 void loop()
   {
-  mqttReconnect(); //make sure we stay connected to the broker
+  if (settings.validConfig==VALID_SETTINGS_FLAG
+      && WiFi.status() == WL_CONNECTED)
+    {
+    mqttReconnect(); //make sure we stay connected to the broker
+    } 
   checkForCommand(); // Check for input in case something needs to be changed to work
   ArduinoOTA.handle(); //Check for new version
 
@@ -549,8 +525,8 @@ boolean connectToWiFi()
 
     WiFi.mode(WIFI_STA); //station mode, we are only a client in the wifi world
     
-    if (strlen(settings.hostName)>0)
-      WiFi.hostname(settings.hostName); //else use the default
+    // if (strlen(settings.hostName)>0)
+    //   WiFi.hostname(settings.hostName); //else use the default
 
     WiFi.begin(settings.ssid, settings.wifiPassword);
 
@@ -625,7 +601,7 @@ void mqttReconnect()
   {
   bool ledLit=true; //blink the LED when attempting to connect
   digitalWrite(LED_BUILTIN,LED_ON);
-  
+    
   // Loop until we're reconnected
   while (!mqttClient.connected() && settings.validConfig==VALID_SETTINGS_FLAG) 
     {  
@@ -819,8 +795,13 @@ void showSettings()
   Serial.print("commandTopic=<mqtt message for commands to this device> (");
   Serial.print(settings.commandTopic);
   Serial.println(")");
-  Serial.print("hostName=<network name for this device> (");
-  Serial.print(settings.hostName);
+  // Serial.print("hostName=<network name for this device> (");
+  // Serial.print(settings.hostName);
+  Serial.print("noteLengthMs=<length of notes in milliseconds> (");
+  Serial.print(settings.noteLengthMs);
+  Serial.println(")");
+  Serial.print("noteOctave=<octave of note, 0 through 8> (");
+  Serial.print(settings.noteOctave);
   Serial.println(")");
   Serial.print("debug=<print debug messages to serial port> (");
   Serial.print(settings.debug?"true":"false");
@@ -896,17 +877,20 @@ bool processCommand(String cmd)
     }
   else if (strcmp(nme,"ssid")==0)
     {
-    strcpy(settings.ssid,val);
+    strncpy(settings.ssid,val,SSID_SIZE);
+    settings.ssid[SSID_SIZE]='\0';
     saveSettings();
     }
   else if (strcmp(nme,"wifipass")==0)
     {
-    strcpy(settings.wifiPassword,val);
+    strncpy(settings.wifiPassword,val,PASSWORD_SIZE);
+    settings.wifiPassword[PASSWORD_SIZE]='\0';
     saveSettings();
     }
   else if (strcmp(nme,"broker")==0)
     {
-    strcpy(settings.brokerAddress,val);
+    strncpy(settings.brokerAddress,val,ADDRESS_SIZE);
+    settings.brokerAddress[ADDRESS_SIZE]='\0';
     saveSettings();
     }
   else if (strcmp(nme,"brokerPort")==0)
@@ -916,77 +900,92 @@ bool processCommand(String cmd)
     }
   else if (strcmp(nme,"userName")==0)
     {
-    strcpy(settings.mqttUsername,val);
+    strncpy(settings.mqttUsername,val,USERNAME_SIZE);
+    settings.mqttUsername[USERNAME_SIZE]='\0';
     saveSettings();
     }
   else if (strcmp(nme,"userPass")==0)
     {
-    strcpy(settings.mqttUserPassword,val);
+    strncpy(settings.mqttUserPassword,val,PASSWORD_SIZE);
+    settings.mqttUserPassword[PASSWORD_SIZE]='\0';
     saveSettings();
     }
   else if (strcmp(nme,"lwtMessage")==0)
     {
-    strcpy(settings.mqttLWTMessage,val);
+    strncpy(settings.mqttLWTMessage,val,MQTT_MAX_MESSAGE_SIZE);
+    settings.mqttLWTMessage[MQTT_MAX_MESSAGE_SIZE]='\0';
     saveSettings();
     }
   else if (strcmp(nme,"topic1")==0)
     {
-    strcpy(settings.mqttTopic1,val);
+    strncpy(settings.mqttTopic1,val,MQTT_MAX_TOPIC_SIZE);
+    settings.mqttTopic1[MQTT_MAX_TOPIC_SIZE]='\0';
     saveSettings();
     }
   else if (strcmp(nme,"topic2")==0)
     {
-    strcpy(settings.mqttTopic2,val);
+    strncpy(settings.mqttTopic2,val,MQTT_MAX_TOPIC_SIZE);
+    settings.mqttTopic2[MQTT_MAX_TOPIC_SIZE]='\0';
     saveSettings();
     }
   else if (strcmp(nme,"topic3")==0)
     {
-    strcpy(settings.mqttTopic3,val);
+    strncpy(settings.mqttTopic3,val,MQTT_MAX_TOPIC_SIZE);
+    settings.mqttTopic3[MQTT_MAX_TOPIC_SIZE]='\0';
     saveSettings();
     }
   else if (strcmp(nme,"topic4")==0)
     {
-    strcpy(settings.mqttTopic4,val);
+    strncpy(settings.mqttTopic4,val,MQTT_MAX_TOPIC_SIZE);
+    settings.mqttTopic4[MQTT_MAX_TOPIC_SIZE]='\0';
     saveSettings();
     }
   else if (strcmp(nme,"message1")==0)
     {
-    strcpy(settings.mqttMessage1,val);
+    strncpy(settings.mqttMessage1,val,MQTT_MAX_MESSAGE_SIZE);
+    settings.mqttMessage1[MQTT_MAX_MESSAGE_SIZE]='\0';
     saveSettings();
     }
   else if (strcmp(nme,"message2")==0)
     {
-    strcpy(settings.mqttMessage2,val);
+    strncpy(settings.mqttMessage2,val,MQTT_MAX_MESSAGE_SIZE);
+    settings.mqttMessage2[MQTT_MAX_MESSAGE_SIZE]='\0';
     saveSettings();
     }
   else if (strcmp(nme,"message3")==0)
     {
-    strcpy(settings.mqttMessage3,val);
+    strncpy(settings.mqttMessage3,val,MQTT_MAX_MESSAGE_SIZE);
+    settings.mqttMessage3[MQTT_MAX_MESSAGE_SIZE]='\0';
     saveSettings();
     }
   else if (strcmp(nme,"message4")==0)
     {
-    strcpy(settings.mqttMessage4,val);
+    strncpy(settings.mqttMessage4,val,MQTT_MAX_MESSAGE_SIZE);
+    settings.mqttMessage4[MQTT_MAX_MESSAGE_SIZE]='\0';
     saveSettings();
     }
   else if (strcmp(nme,"soundPattern1")==0)
     {
-    strcpy(settings.soundPattern1,val);
+    strncpy(settings.soundPattern1,val,TONE_MAX_PATTERN_LENGTH);
+    settings.soundPattern1[TONE_MAX_PATTERN_LENGTH]='\0';
     saveSettings();
     }
   else if (strcmp(nme,"soundPattern2")==0)
     {
-    strcpy(settings.soundPattern2,val);
+    strncpy(settings.soundPattern2,val,TONE_MAX_PATTERN_LENGTH);
+    settings.soundPattern2[TONE_MAX_PATTERN_LENGTH]='\0';
     saveSettings();
     }
   else if (strcmp(nme,"soundPattern3")==0)
     {
-    strcpy(settings.soundPattern3,val);
+    strncpy(settings.soundPattern3,val,TONE_MAX_PATTERN_LENGTH);
+    settings.soundPattern3[TONE_MAX_PATTERN_LENGTH]='\0';
     saveSettings();
     }
   else if (strcmp(nme,"soundPattern4")==0)
     {
-    strcpy(settings.soundPattern4,val);
+    strncpy(settings.soundPattern4,val,TONE_MAX_PATTERN_LENGTH);
+    settings.soundPattern4[TONE_MAX_PATTERN_LENGTH]='\0';
     saveSettings();
     }
   else if ((strcmp(nme,"resetmqttid")==0)&& (strcmp(val,"yes")==0))
@@ -999,9 +998,14 @@ bool processCommand(String cmd)
     strcpy(settings.commandTopic,val);
     saveSettings();
     }
-  else if (strcmp(nme,"hostName")==0)
+  else if (strcmp(nme,"noteLengthMs")==0)
     {
-    strcpy(settings.hostName,val);
+    settings.noteLengthMs=atoi(val);
+    saveSettings();
+    }
+  else if (strcmp(nme,"noteOctave")==0)
+    {
+    settings.noteOctave=atoi(val);
     saveSettings();
     }
   else if (strcmp(nme,"debug")==0)
@@ -1043,10 +1047,10 @@ void initializeSettings()
   strcpy(settings.mqttMessage2,"");
   strcpy(settings.mqttMessage3,"");
   strcpy(settings.mqttMessage4,"");
-  strcpy(settings.soundPattern1,TONAL_SOUND_PATTERN_1);
-  strcpy(settings.soundPattern2,TONAL_SOUND_PATTERN_2);
-  strcpy(settings.soundPattern3,TONAL_SOUND_PATTERN_3);
-  strcpy(settings.soundPattern4,TONAL_SOUND_PATTERN_4);
+  strcpy(settings.soundPattern1,TONE_SOUND_PATTERN_1);
+  strcpy(settings.soundPattern2,TONE_SOUND_PATTERN_2);
+  strcpy(settings.soundPattern3,TONE_SOUND_PATTERN_3);
+  strcpy(settings.soundPattern4,TONE_SOUND_PATTERN_4);
   strcpy(settings.mqttTopic1,DEFAULT_MQTT_TOPIC);
   strcpy(settings.mqttTopic2,"");
   strcpy(settings.mqttTopic3,"");
@@ -1056,7 +1060,8 @@ void initializeSettings()
   strcpy(settings.commandTopic,DEFAULT_MQTT_TOPIC);
   generateMqttClientId(settings.mqttClientId);
   settings.debug=false;
-  strcpy(settings.hostName,"");
+  settings.noteLengthMs=DEFAULT_NOTE_LENGTH_MS;
+  settings.noteOctave=DEFAULT_NOTE_OCTAVE;
   saveSettings();
   }
 
@@ -1094,6 +1099,8 @@ void loadSettings()
  */
 boolean saveSettings()
   {
+  static boolean wasIncomplete=false;
+  static boolean shouldReboot=false;
   if (strlen(settings.ssid)>0 &&
     strlen(settings.ssid)<=SSID_SIZE &&
     strlen(settings.wifiPassword)>0 &&
@@ -1107,10 +1114,10 @@ boolean saveSettings()
     strlen(settings.mqttMessage2)<MQTT_MAX_MESSAGE_SIZE &&
     strlen(settings.mqttMessage3)<MQTT_MAX_MESSAGE_SIZE &&
     strlen(settings.mqttMessage4)<MQTT_MAX_MESSAGE_SIZE &&
-    strlen(settings.soundPattern1)<TONAL_MAX_PATTERN_LENGTH &&
-    strlen(settings.soundPattern2)<TONAL_MAX_PATTERN_LENGTH &&
-    strlen(settings.soundPattern3)<TONAL_MAX_PATTERN_LENGTH &&
-    strlen(settings.soundPattern4)<TONAL_MAX_PATTERN_LENGTH &&
+    strlen(settings.soundPattern1)<=TONE_MAX_PATTERN_LENGTH &&
+    strlen(settings.soundPattern2)<=TONE_MAX_PATTERN_LENGTH &&
+    strlen(settings.soundPattern3)<=TONE_MAX_PATTERN_LENGTH &&
+    strlen(settings.soundPattern4)<=TONE_MAX_PATTERN_LENGTH &&
     strlen(settings.mqttTopic1)>0 &&
     strlen(settings.mqttTopic1)<MQTT_MAX_TOPIC_SIZE &&
     strlen(settings.mqttTopic2)<MQTT_MAX_TOPIC_SIZE &&
@@ -1123,12 +1130,18 @@ boolean saveSettings()
     Serial.println("Settings deemed complete");
     settings.validConfig=VALID_SETTINGS_FLAG;
     settingsAreValid=true;
+    if (wasIncomplete)
+      {
+      wasIncomplete=false;
+      shouldReboot=true;
+      }
     }
   else
     {
     Serial.println("Settings still incomplete");
     settings.validConfig=0;
     settingsAreValid=false;
+    wasIncomplete=true;
     }
 
   //The mqttClientId is not set by the user, but we need to make sure it's set  
@@ -1139,6 +1152,14 @@ boolean saveSettings()
 
   EEPROM.put(0,settings);
   return EEPROM.commit();
+
+  if (shouldReboot)
+    {
+    Serial.println("Settings now valid, restarting.");
+    delay(1000);
+    shouldReboot=false;
+    ESP.restart();
+    }
   }
 
 /*
