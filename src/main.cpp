@@ -66,8 +66,6 @@ boolean settingsAreValid=false;
 String commandString = "";     // a String to hold incoming commands from serial
 bool commandComplete = false;  // goes true when enter is pressed
 
-boolean messageWasReceived=false;
-
 void printStackSize(char id)
   {
   char stack;
@@ -270,40 +268,36 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
       && strcmp(charbuf,settings.mqttMessage1)==0
       && strcmp(reqTopic,settings.mqttTopic1)==0)
     {
-    messageWasReceived=true;
     if (millis()>noRepeat1)
       beep(settings.soundPattern1);
-    noRepeat1=millis()+REPEAT_LIMIT_MS; //can't do it again for 5 seconds
+    noRepeat1=millis()+REPEAT_LIMIT_MS; //can't do it again for a few seconds
     response="OK";
     }
   else if (strlen(settings.mqttMessage2)>0 
       && strcmp(charbuf,settings.mqttMessage2)==0
       && strcmp(reqTopic,settings.mqttTopic2)==0)
     {
-    messageWasReceived=true;
     if (millis()>noRepeat2)
       beep(settings.soundPattern2);
-    noRepeat2=millis()+REPEAT_LIMIT_MS; //can't do it again for 5 seconds
+    noRepeat2=millis()+REPEAT_LIMIT_MS; //can't do it again for a few seconds
     response="OK";
     }
   else if (strlen(settings.mqttMessage3)>0 
       && strcmp(charbuf,settings.mqttMessage3)==0
       && strcmp(reqTopic,settings.mqttTopic3)==0)
     {
-    messageWasReceived=true;
     if (millis()>noRepeat3)
       beep(settings.soundPattern3);      
-    noRepeat3=millis()+REPEAT_LIMIT_MS; //can't do it again for 5 seconds
+    noRepeat3=millis()+REPEAT_LIMIT_MS; //can't do it again for a few seconds
     response="OK";
     }
   else if (strlen(settings.mqttMessage4)>0 
       && strcmp(charbuf,settings.mqttMessage4)==0
       && strcmp(reqTopic,settings.mqttTopic4)==0)
     {
-    messageWasReceived=true;
     if (millis()>noRepeat4)
       beep(settings.soundPattern4);      
-    noRepeat4=millis()+REPEAT_LIMIT_MS; //can't do it again for 5 seconds
+    noRepeat4=millis()+REPEAT_LIMIT_MS; //can't do it again for a few seconds
     response="OK";
     }
   else if (strcmp(reqTopic,settings.commandTopic)==0 &&
@@ -460,8 +454,6 @@ void setup()
   else
     Serial.println("passed.");
   
-  messageWasReceived=false;
-
   if (settings.debug)
     Serial.println(F("Connecting to WiFi"));
   
