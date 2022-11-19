@@ -16,6 +16,11 @@
 #include <pgmspace.h>
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
+#include <LiquidCrystal.h>
+#include <NTPClient.h>
+#include <TimeLib.h>
+#include "SoftwareSerial.h"
+#include "DFRobotDFPlayerMini.h"
 
 #ifdef ESP32
   #include <Tone32.h>
@@ -28,6 +33,8 @@ char *stack_start;// initial stack size
 
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
+
+LiquidCrystal lcd(D0,D1,D2,D5,D6,D7); //RS, Enable, Data4, Data5, Data6, Data7 on display
 
 // These are the settings that get stored in EEPROM.  They are all in one struct which
 // makes it easier to store and retrieve.
@@ -48,23 +55,133 @@ typedef struct
   char mqttMessage2[MQTT_MAX_MESSAGE_SIZE+1]="";
   char mqttMessage3[MQTT_MAX_MESSAGE_SIZE+1]="";
   char mqttMessage4[MQTT_MAX_MESSAGE_SIZE+1]="";
-  char soundPattern1[TONE_MAX_PATTERN_LENGTH+1]=TONE_SOUND_PATTERN_1;
-  char soundPattern2[TONE_MAX_PATTERN_LENGTH+1]=TONE_SOUND_PATTERN_2;
-  char soundPattern3[TONE_MAX_PATTERN_LENGTH+1]=TONE_SOUND_PATTERN_3;
-  char soundPattern4[TONE_MAX_PATTERN_LENGTH+1]=TONE_SOUND_PATTERN_4;
+  char description1[DISPLAY_COLUMNS+1]=""; //for the LCD
+  char description2[DISPLAY_COLUMNS+1]="";
+  char description3[DISPLAY_COLUMNS+1]="";
+  char description4[DISPLAY_COLUMNS+1]="";
   char mqttLWTMessage[MQTT_MAX_MESSAGE_SIZE+1]="";
   char commandTopic[MQTT_MAX_TOPIC_SIZE+1]=DEFAULT_MQTT_TOPIC;
   boolean debug=false;
   char mqttClientId[MQTT_CLIENTID_SIZE+1]=""; //will be the same across reboots
-  unsigned int noteLengthMs=DEFAULT_NOTE_LENGTH_MS;
-  int noteOctave=DEFAULT_NOTE_OCTAVE; //can be 0 though 8
+  int gmtOffset=0; // -6 for CST
   } conf;
 
 conf settings; //all settings in one struct makes it easier to store in EEPROM
 boolean settingsAreValid=false;
+boolean setupOK=false;
 
 String commandString = "";     // a String to hold incoming commands from serial
 bool commandComplete = false;  // goes true when enter is pressed
+
+char clockTime[DISPLAY_COLUMNS+1]="";
+
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org");
+
+SoftwareSerial mySoftwareSerial(D4, D3); // RX, TX
+DFRobotDFPlayerMini myDFPlayer;
+
+char lastLastLine[DISPLAY_COLUMNS+1]="";
+
+/// @brief Show a message on the LCD, with optional timestamp.
+/// @param msg - message to display
+/// @param showTimestamp - show the timestamp on line 0
+/// @param clear - clear the display first
+/// @param lineNumber - put message on this line (0=based)
+void show(char* msg, boolean showTimestamp, boolean clear=false, int lineNumber=1)
+  {
+  if (clear) 
+    {
+    lcd.clear();
+    lastLastLine[0]='\0'; // clear the last line buffer too
+    delay(500);
+    } 
+
+  if (showTimestamp)
+    {
+    lcd.clear();
+    lastLastLine[0]='\0'; // clear the last line buffer too    
+    lcd.setCursor(0, 0);
+    lcd.print(clockTime); //current timestamp
+    }
+
+  if (strlen(msg)>0)
+    {
+    char buf[DISPLAY_COLUMNS+1];
+    strncpy(buf,msg,DISPLAY_COLUMNS); //make sure message is not too long
+    buf[DISPLAY_COLUMNS]='\0';
+    lcd.setCursor(0,lineNumber);
+    lcd.print(buf);
+    if (lineNumber==DISPLAY_ROWS-1)
+      strcpy(lastLastLine,buf); //save the bottom line for scroll
+    }
+  }
+
+void scrollDisplay()
+  {
+  char buf[DISPLAY_COLUMNS+1];
+  strcpy(buf,lastLastLine); //show is pass by reference
+  buf[DISPLAY_COLUMNS]='\0';
+  show(buf,false,true,0);
+  }
+
+boolean refreshTime()
+  {
+  boolean ok=true;
+  Serial.print(timeClient.getFormattedTime());
+  Serial.print("\tRefreshing time...");
+  if (WiFi.status() != WL_CONNECTED)
+    {
+    Serial.println("Abort, WiFi not connected.");
+    ok=false;
+    }
+  else
+    {
+    connectToWiFi(); //may need to connect to the wifi
+    if (settingsAreValid && WiFi.status() == WL_CONNECTED)
+      {
+      bool timeGood=timeClient.update();
+      if (timeGood)
+        {
+        timeClient.setTimeOffset(settings.gmtOffset*3600);
+        Serial.println("done.");
+        Serial.print("Time is ");
+        Serial.println(timeClient.getFormattedTime());
+        }
+      else
+        {
+        Serial.println("***** Unable to refresh time *****");
+        ok=false;
+        }
+      }
+    }
+  return ok;
+  } 
+
+
+boolean updateClock()
+  {
+  static unsigned long lastTime=0;
+  unsigned long currentTime=timeClient.getEpochTime();
+  boolean ok=true;
+
+  if (settingsAreValid && currentTime != lastTime)
+    {
+    //Update the time every 12 hours, or if we just powered up
+    if (currentTime%43200 ==0 || timeClient.getEpochTime() < 100000)
+      {
+      ok=refreshTime();
+      }
+    lastTime=currentTime;
+
+    unsigned long today=timeClient.getEpochTime();
+    char datebuff[32];
+    sprintf(datebuff,"%02d/%02d %s",month(today),day(today),timeClient.getFormattedTime().c_str());
+    strncpy(clockTime,datebuff,DISPLAY_COLUMNS);
+    clockTime[DISPLAY_COLUMNS]='\0';
+    }
+  return ok;
+  }
 
 void printStackSize(char id)
   {
@@ -95,48 +212,67 @@ boolean publish(char* topic, const char* msg, boolean retain)
   return mqttClient.publish(topic,msg,retain); 
   }
 
-
-void beep(const char* pattern)
-  {
-  char* endPtr; //needed for strtol function, not used in code
-  int patLen=(int)strlen(pattern);
-  if (settings.debug)
-    {
-    Serial.print("Beeping ");
-    Serial.println(pattern);
-    Serial.print("Pattern has ");
-    Serial.print(patLen);
-    Serial.println(" notes");
-    }
-  for (int i=0;i<patLen;i++)
-    {
-    char tmp[2]="\0";
-    strncpy(tmp,&pattern[i],1);
-    int noteIndex=(int)strtol(tmp,&endPtr,16);
-    if (noteIndex>0 && noteIndex<=12)
-      {
-      digitalWrite(FLASHLED_PORT,FLASHLED_ON);
-      if (settings.debug)
-        {
-        Serial.print(noteIndex, HEX);
-        Serial.print(" ");
-        }
-      tone(SOUNDER_PORT,notePitchHz[noteIndex][settings.noteOctave]);
-      delay(settings.noteLengthMs);
-      noTone(SOUNDER_PORT); //tone doesn't block, so we need to do it this way
-      digitalWrite(FLASHLED_PORT,FLASHLED_OFF);
+/* Get and print the details of any messages from the mp3 player. */
+void printDetail(uint8_t type, int value){
+  switch (type) {
+    case TimeOut:
+      Serial.println(F("Time Out!"));
+      break;
+    case WrongStack:
+      Serial.println(F("Stack Wrong!"));
+      break;
+    case DFPlayerCardInserted:
+      Serial.println(F("Card Inserted!"));
+      break;
+    case DFPlayerCardRemoved:
+      Serial.println(F("Card Removed!"));
+      break;
+    case DFPlayerCardOnline:
+      Serial.println(F("Card Online!"));
+      break;
+    case DFPlayerUSBInserted:
+      Serial.println("USB Inserted!");
+      break;
+    case DFPlayerUSBRemoved:
+      Serial.println("USB Removed!");
+      break;
+    case DFPlayerPlayFinished:
+      Serial.print(F("Number:"));
+      Serial.print(value);
+      Serial.println(F(" Play Finished!"));
+      break;
+    case DFPlayerError:
+      Serial.print(F("DFPlayerError:"));
+      switch (value) {
+        case Busy:
+          Serial.println(F("Card not found"));
+          break;
+        case Sleeping:
+          Serial.println(F("Sleeping"));
+          break;
+        case SerialWrongStack:
+          Serial.println(F("Get Wrong Stack"));
+          break;
+        case CheckSumNotMatch:
+          Serial.println(F("Check Sum Not Match"));
+          break;
+        case FileIndexOut:
+          Serial.println(F("File Index Out of Bound"));
+          break;
+        case FileMismatch:
+          Serial.println(F("Cannot Find File"));
+          break;
+        case Advertise:
+          Serial.println(F("In Advertise"));
+          break;
+        default:
+          break;
       }
-    else
-      {
-      if (settings.debug)
-        Serial.print(". ");
-      delay(settings.noteLengthMs);
-      }
-    delay(settings.noteLengthMs/2);
-    }
-  if (settings.debug)
-    Serial.println("");
+      break;
+    default:
+      break;
   }
+}
 
 
 /**
@@ -226,29 +362,26 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     strcat(settingsResp,"message4=");
     strcat(settingsResp,settings.mqttMessage4);
     strcat(settingsResp,"\n");
-    strcat(settingsResp,"soundPattern1=");
-    strcat(settingsResp,settings.soundPattern1);
+    strcat(settingsResp,"description1=");
+    strcat(settingsResp,settings.description1);
     strcat(settingsResp,"\n");
-    strcat(settingsResp,"soundPattern2=");
-    strcat(settingsResp,settings.soundPattern2);
+    strcat(settingsResp,"description2=");
+    strcat(settingsResp,settings.description2);
     strcat(settingsResp,"\n");
-    strcat(settingsResp,"soundPattern3=");
-    strcat(settingsResp,settings.soundPattern3);
+    strcat(settingsResp,"description3=");
+    strcat(settingsResp,settings.description3);
     strcat(settingsResp,"\n");
-    strcat(settingsResp,"soundPattern4=");
-    strcat(settingsResp,settings.soundPattern4);
+    strcat(settingsResp,"description4=");
+    strcat(settingsResp,settings.description4);
+    strcat(settingsResp,"\n");
+    strcat(settingsResp,"gmtOffset=");
+    strcat(settingsResp,String(settings.gmtOffset).c_str());
     strcat(settingsResp,"\n");
     strcat(settingsResp,"debug=");
     strcat(settingsResp,settings.debug?"true":"false");
     strcat(settingsResp,"\n");
     strcat(settingsResp,"commandTopic=");
     strcat(settingsResp,settings.commandTopic);
-    strcat(settingsResp,"\n");
-    strcat(settingsResp,"noteLengthMs=");
-    strcat(settingsResp,String(settings.noteLengthMs).c_str());
-    strcat(settingsResp,"\n");
-    strcat(settingsResp,"noteOctave=");
-    strcat(settingsResp,String(settings.noteOctave).c_str());
     strcat(settingsResp,"\n");
     strcat(settingsResp,"MQTT client ID=");
     strcat(settingsResp,settings.mqttClientId);
@@ -269,7 +402,12 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
       && strcmp(reqTopic,settings.mqttTopic1)==0)
     {
     if (millis()>noRepeat1)
-      beep(settings.soundPattern1);
+      {
+      show(settings.description1,true);
+//      beep(settings.soundPattern1);
+//      delay(1000);
+      myDFPlayer.play(1);
+      }
     noRepeat1=millis()+REPEAT_LIMIT_MS; //can't do it again for a few seconds
     response="OK";
     }
@@ -278,7 +416,12 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
       && strcmp(reqTopic,settings.mqttTopic2)==0)
     {
     if (millis()>noRepeat2)
-      beep(settings.soundPattern2);
+      {
+      show(settings.description2,true);
+//      beep(settings.soundPattern2);
+//      delay(1000);
+      myDFPlayer.play(2);
+      }
     noRepeat2=millis()+REPEAT_LIMIT_MS; //can't do it again for a few seconds
     response="OK";
     }
@@ -287,7 +430,12 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
       && strcmp(reqTopic,settings.mqttTopic3)==0)
     {
     if (millis()>noRepeat3)
-      beep(settings.soundPattern3);      
+      {
+      show(settings.description3,true);
+//      beep(settings.soundPattern3);
+//      delay(1000);
+      myDFPlayer.play(3);
+      }
     noRepeat3=millis()+REPEAT_LIMIT_MS; //can't do it again for a few seconds
     response="OK";
     }
@@ -296,8 +444,13 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
       && strcmp(reqTopic,settings.mqttTopic4)==0)
     {
     if (millis()>noRepeat4)
-      beep(settings.soundPattern4);      
-    noRepeat4=millis()+REPEAT_LIMIT_MS; //can't do it again for a few seconds
+      {
+      show(settings.description4,true);
+      // beep(settings.soundPattern4);
+      // delay(1000);
+      myDFPlayer.play(4);
+      }
+    noRepeat4=millis()+REPEAT_LIMIT_MS; //don't do it again for a few seconds
     response="OK";
     }
   else if (strcmp(reqTopic,settings.commandTopic)==0 &&
@@ -414,12 +567,15 @@ void setup()
   char stack;
   stack_start = &stack;  
   
+  setupOK=true; //will stay true unless a failure occurs somewhere
+
   pinMode(LED_BUILTIN,OUTPUT);// The blue light on the board shows WiFi activity
   digitalWrite(LED_BUILTIN,LED_OFF);
-  pinMode(SOUNDER_PORT,OUTPUT); // The port for the sounder device
-  digitalWrite(SOUNDER_PORT,SOUNDER_OFF); //silence the sounder
+  //pinMode(SOUNDER_PORT,OUTPUT); // The port for the sounder device
+  //digitalWrite(SOUNDER_PORT,SOUNDER_OFF); //silence the sounder
   pinMode(FLASHLED_PORT,OUTPUT); // The port for the history LED
   digitalWrite(FLASHLED_PORT,FLASHLED_OFF); //turn off the LED until we receive a mqtt message
+
 
   Serial.begin(115200);
   Serial.setTimeout(10000);
@@ -428,11 +584,20 @@ void setup()
   while (!Serial); // wait here for serial port to connect.
   Serial.println(F("Running."));
 
+  mySoftwareSerial.begin(9600); //for comm with mp3 player
+  Serial.print(F("MP3 player baud rate is "));
+  Serial.println(mySoftwareSerial.baudRate());
+
+  lcd.begin(DISPLAY_COLUMNS, DISPLAY_ROWS); //16 chars x 2 rows
+  show(const_cast<char*>("Starting..."),false,true);
+
   EEPROM.begin(sizeof(settings)); //fire up the eeprom section of flash
   commandString.reserve(200); // reserve 200 bytes of serial buffer space for incoming command string
 
   if (settings.debug)
     Serial.println(F("Loading settings"));
+  scrollDisplay();
+  show(const_cast<char*>("Loading settings"),false);
   loadSettings(); //set the values from eeprom
 
   Serial.print("Performing settings sanity check...");
@@ -444,9 +609,10 @@ void setup()
       strlen(settings.mqttMessage2)>MQTT_MAX_MESSAGE_SIZE ||
       strlen(settings.mqttMessage3)>MQTT_MAX_MESSAGE_SIZE ||
       strlen(settings.mqttMessage4)>MQTT_MAX_MESSAGE_SIZE ||
-      settings.noteLengthMs>10000  ||
-      settings.noteOctave>8 || 
-      settings.noteOctave<0)
+      strlen(settings.description1)>DISPLAY_COLUMNS ||
+      strlen(settings.description2)>DISPLAY_COLUMNS ||
+      strlen(settings.description3)>DISPLAY_COLUMNS ||
+      strlen(settings.description4)>DISPLAY_COLUMNS)
     {
     Serial.println("\nSettings in eeprom failed sanity check, initializing.");
     initializeSettings(); //must be a new board or flash was erased
@@ -458,42 +624,102 @@ void setup()
     Serial.println(F("Connecting to WiFi"));
   
   if (settings.validConfig==VALID_SETTINGS_FLAG)
-    connectToWiFi(); //connect to the wifi
-  
-  if (WiFi.status() == WL_CONNECTED)
     {
-    otaSetup(); //initialize the OTA stuff
+    scrollDisplay();
+    show(const_cast<char*>("Connecting WiFi"),false);
+    connectToWiFi(); //connect to the wifi
+    }
+  
+  if (settingsAreValid)
+    {
+    if (WiFi.status() != WL_CONNECTED)
+      {
+      setupOK=false;
+      digitalWrite(LED_BUILTIN,LED_OFF);
+      scrollDisplay();
+      show(const_cast<char*>("WiFi error."),false);
+      }
+    else
+      {
+      scrollDisplay();
+      show(const_cast<char*>("Fetching time..."),false);
+  
+      if (setupOK && !refreshTime())
+        {
+        Serial.println(F("Couldn't refresh time."));
+        scrollDisplay();
+        show(const_cast<char*>("Time error."),false);
+        setupOK=false;
+        }
+      if (setupOK)
+        {
+        scrollDisplay();
+        show(const_cast<char*>("Updating Clock.."),false);
+        }
+      if (setupOK && !updateClock())
+        {
+        Serial.println(F("Couldn't update clock."));
+        scrollDisplay();
+        show(const_cast<char*>("Clock error."),false);
+        setupOK=false;
+        }
+      otaSetup(); //initialize the OTA stuff
+      mqttReconnect(); // go ahead and connect to the MQTT broker
+
+      if (setupOK)
+        {
+        scrollDisplay();
+        show(const_cast<char*>("Init MP3 Player"),false);
+        }
+      if (setupOK && !myDFPlayer.begin(mySoftwareSerial)) 
+        {
+        Serial.print("Files on SD card: ");
+        Serial.println(myDFPlayer.readFileCounts());
+        delay(2000);
+        if (!myDFPlayer.begin(mySoftwareSerial))  //try again
+          {
+          Serial.print("Files on SD card: ");
+          Serial.println(myDFPlayer.readFileCounts());
+          Serial.println(F("MP3 player is borked."));
+          scrollDisplay();
+          show(const_cast<char*>("MP3 player error"),true);
+          setupOK=false;
+          }
+        }
+      myDFPlayer.setTimeOut(500); //Set serial communictaion time out 500ms
+      myDFPlayer.EQ(DFPLAYER_EQ_NORMAL); //normal equalization
+      myDFPlayer.outputDevice(DFPLAYER_DEVICE_SD); // it's really the input device (sd card)
+      myDFPlayer.volume(30);  //Set volume value (0~30).
+
+      if (setupOK)
+        show(const_cast<char*>("Startup complete"),true);
+      }
     }
   else
-    digitalWrite(LED_BUILTIN,LED_OFF);
+    {
+    setupOK=false;
+    show(const_cast<char*>("Settings are"),true,false,0);
+    show(const_cast<char*>("incomplete."),false,false,1);
+    }
   }
 
 void loop()
   {
   if (settings.validConfig==VALID_SETTINGS_FLAG
-      && WiFi.status() == WL_CONNECTED)
+      && WiFi.status() == WL_CONNECTED
+      && setupOK)
     {
     mqttReconnect(); //make sure we stay connected to the broker
     } 
   checkForCommand(); // Check for input in case something needs to be changed to work
   ArduinoOTA.handle(); //Check for new version
 
-  // if (millis()>=timeoutCount && !timeoutMessageSent)
-  //   {
-  //   digitalWrite(RELAY_PORT,RELAY_OFF); //turn off the device
-  //   digitalWrite(LED_PORT,LED_ON); //turn on the failure LED
-  //   connectToWiFi(); //make sure we're connected to the broker
-  //   timeoutMessageSent=sendMessage(MQTT_TOPIC_STATUS, settings.mqttTimeoutMessage);
-  //   }
+  //update the realtime clock once per second
+  if (millis()%1000==0 && setupOK)
+    updateClock();
 
-  // static unsigned long nextFlashTime=millis()+250;
-  // if (millis()>=timeoutCount && millis()>nextFlashTime && timeoutMessageSent) //flash the led
-  //   {
-  //   static boolean warning_led_state=LED_ON;
-  //   digitalWrite(LED_PORT,warning_led_state);
-  //   warning_led_state=!warning_led_state;
-  //   nextFlashTime=millis()+250; //half second flash rate
-  //   }
+  if (setupOK && myDFPlayer.available()) //Print the detail message from DFPlayer for different errors and states.
+    printDetail(myDFPlayer.readType(), myDFPlayer.read()); 
   }
 
 
@@ -570,10 +796,6 @@ boolean connectToWiFi()
   else
     digitalWrite(LED_BUILTIN,LED_OFF);
 
-  if (WiFi.status() == WL_CONNECTED)
-    {
-    mqttReconnect(); // go ahead and connect to the MQTT broker
-    }
   return retval;
   }
 
@@ -751,8 +973,8 @@ void showSettings()
   Serial.print("message1=<a message for topic 1> (");
   Serial.print(settings.mqttMessage1);
   Serial.println(")");
-  Serial.print("soundPattern1=<an 8-bit pattern describing the sound pattern when message1 is received> (");
-  Serial.print(settings.soundPattern1);
+  Serial.print("description1=<what to display when message1 is received> (");
+  Serial.print(settings.description1);
   Serial.println(")");
   Serial.print("topic2=<MQTT topic for which to subscribe> (");
   Serial.print(settings.mqttTopic2);
@@ -760,17 +982,17 @@ void showSettings()
   Serial.print("message2=<a message for topic 2> (");
   Serial.print(settings.mqttMessage2);
   Serial.println(")");
-  Serial.print("soundPattern2=<an 8-bit pattern describing the sound pattern when message2 is received> (");
-  Serial.print(settings.soundPattern2);
+  Serial.print("description2=<what to display when message2 is received> (");
+  Serial.print(settings.description2);
   Serial.println(")");
   Serial.print("topic3=<MQTT topic for which to subscribe> (");
   Serial.print(settings.mqttTopic3);
   Serial.println(")");
   Serial.print("message3=<a message for topic 3> (");
-  Serial.print(settings.mqttMessage3);
+  Serial.print(settings.mqttMessage2);
   Serial.println(")");
-  Serial.print("soundPattern3=<an 8-bit pattern describing the sound pattern when message3 is received> (");
-  Serial.print(settings.soundPattern3);
+  Serial.print("description3=<what to display when message3 is received> (");
+  Serial.print(settings.description3);
   Serial.println(")");
   Serial.print("topic4=<MQTT topic for which to subscribe> (");
   Serial.print(settings.mqttTopic4);
@@ -778,8 +1000,8 @@ void showSettings()
   Serial.print("message4=<a message for topic 4> (");
   Serial.print(settings.mqttMessage4);
   Serial.println(")");
-  Serial.print("soundPattern4=<up to 10 char pattern describing the sound pattern when message4 is received> (");
-  Serial.print(settings.soundPattern4);
+  Serial.print("description4=<what to display when message4 is received> (");
+  Serial.print(settings.description4);
   Serial.println(")");
   Serial.print("lwtMessage=<status message to send when power is removed> (");
   Serial.print(settings.mqttLWTMessage);
@@ -787,13 +1009,8 @@ void showSettings()
   Serial.print("commandTopic=<mqtt message for commands to this device> (");
   Serial.print(settings.commandTopic);
   Serial.println(")");
-  // Serial.print("hostName=<network name for this device> (");
-  // Serial.print(settings.hostName);
-  Serial.print("noteLengthMs=<length of notes in milliseconds> (");
-  Serial.print(settings.noteLengthMs);
-  Serial.println(")");
-  Serial.print("noteOctave=<octave of note, 0 through 8> (");
-  Serial.print(settings.noteOctave);
+  Serial.print("gmtOffset=<Time offset from GMT> (");
+  Serial.print(settings.gmtOffset);
   Serial.println(")");
   Serial.print("debug=<print debug messages to serial port> (");
   Serial.print(settings.debug?"true":"false");
@@ -956,28 +1173,28 @@ bool processCommand(String cmd)
     settings.mqttMessage4[MQTT_MAX_MESSAGE_SIZE]='\0';
     saveSettings();
     }
-  else if (strcmp(nme,"soundPattern1")==0)
+  else if (strcmp(nme,"description1")==0)
     {
-    strncpy(settings.soundPattern1,val,TONE_MAX_PATTERN_LENGTH);
-    settings.soundPattern1[TONE_MAX_PATTERN_LENGTH]='\0';
+    strncpy(settings.description1,val,DISPLAY_COLUMNS);
+    settings.description1[DISPLAY_COLUMNS]='\0';
     saveSettings();
     }
-  else if (strcmp(nme,"soundPattern2")==0)
+  else if (strcmp(nme,"description2")==0)
     {
-    strncpy(settings.soundPattern2,val,TONE_MAX_PATTERN_LENGTH);
-    settings.soundPattern2[TONE_MAX_PATTERN_LENGTH]='\0';
+    strncpy(settings.description2,val,DISPLAY_COLUMNS);
+    settings.description2[DISPLAY_COLUMNS]='\0';
     saveSettings();
     }
-  else if (strcmp(nme,"soundPattern3")==0)
+  else if (strcmp(nme,"description3")==0)
     {
-    strncpy(settings.soundPattern3,val,TONE_MAX_PATTERN_LENGTH);
-    settings.soundPattern3[TONE_MAX_PATTERN_LENGTH]='\0';
+    strncpy(settings.description3,val,DISPLAY_COLUMNS);
+    settings.description3[DISPLAY_COLUMNS]='\0';
     saveSettings();
     }
-  else if (strcmp(nme,"soundPattern4")==0)
+  else if (strcmp(nme,"description4")==0)
     {
-    strncpy(settings.soundPattern4,val,TONE_MAX_PATTERN_LENGTH);
-    settings.soundPattern4[TONE_MAX_PATTERN_LENGTH]='\0';
+    strncpy(settings.description4,val,DISPLAY_COLUMNS);
+    settings.description4[DISPLAY_COLUMNS]='\0';
     saveSettings();
     }
   else if ((strcmp(nme,"resetmqttid")==0)&& (strcmp(val,"yes")==0))
@@ -990,14 +1207,9 @@ bool processCommand(String cmd)
     strcpy(settings.commandTopic,val);
     saveSettings();
     }
-  else if (strcmp(nme,"noteLengthMs")==0)
+  else if (strcmp(nme,"gmtOffset")==0)
     {
-    settings.noteLengthMs=atoi(val);
-    saveSettings();
-    }
-  else if (strcmp(nme,"noteOctave")==0)
-    {
-    settings.noteOctave=atoi(val);
+    settings.gmtOffset=atoi(val);
     saveSettings();
     }
   else if (strcmp(nme,"debug")==0)
@@ -1039,10 +1251,10 @@ void initializeSettings()
   strcpy(settings.mqttMessage2,"");
   strcpy(settings.mqttMessage3,"");
   strcpy(settings.mqttMessage4,"");
-  strcpy(settings.soundPattern1,TONE_SOUND_PATTERN_1);
-  strcpy(settings.soundPattern2,TONE_SOUND_PATTERN_2);
-  strcpy(settings.soundPattern3,TONE_SOUND_PATTERN_3);
-  strcpy(settings.soundPattern4,TONE_SOUND_PATTERN_4);
+  strcpy(settings.description1,"");
+  strcpy(settings.description2,"");
+  strcpy(settings.description3,"");
+  strcpy(settings.description4,"");
   strcpy(settings.mqttTopic1,DEFAULT_MQTT_TOPIC);
   strcpy(settings.mqttTopic2,"");
   strcpy(settings.mqttTopic3,"");
@@ -1052,8 +1264,7 @@ void initializeSettings()
   strcpy(settings.commandTopic,DEFAULT_MQTT_TOPIC);
   generateMqttClientId(settings.mqttClientId);
   settings.debug=false;
-  settings.noteLengthMs=DEFAULT_NOTE_LENGTH_MS;
-  settings.noteOctave=DEFAULT_NOTE_OCTAVE;
+  settings.gmtOffset=DEFAULT_GMT_OFFSET;
   saveSettings();
   }
 
@@ -1106,10 +1317,10 @@ boolean saveSettings()
     strlen(settings.mqttMessage2)<MQTT_MAX_MESSAGE_SIZE &&
     strlen(settings.mqttMessage3)<MQTT_MAX_MESSAGE_SIZE &&
     strlen(settings.mqttMessage4)<MQTT_MAX_MESSAGE_SIZE &&
-    strlen(settings.soundPattern1)<=TONE_MAX_PATTERN_LENGTH &&
-    strlen(settings.soundPattern2)<=TONE_MAX_PATTERN_LENGTH &&
-    strlen(settings.soundPattern3)<=TONE_MAX_PATTERN_LENGTH &&
-    strlen(settings.soundPattern4)<=TONE_MAX_PATTERN_LENGTH &&
+    strlen(settings.description1)<=DISPLAY_COLUMNS &&
+    strlen(settings.description2)<=DISPLAY_COLUMNS &&
+    strlen(settings.description3)<=DISPLAY_COLUMNS &&
+    strlen(settings.description4)<=DISPLAY_COLUMNS &&
     strlen(settings.mqttTopic1)>0 &&
     strlen(settings.mqttTopic1)<MQTT_MAX_TOPIC_SIZE &&
     strlen(settings.mqttTopic2)<MQTT_MAX_TOPIC_SIZE &&
