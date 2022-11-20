@@ -64,6 +64,7 @@ typedef struct
   boolean debug=false;
   char mqttClientId[MQTT_CLIENTID_SIZE+1]=""; //will be the same across reboots
   int gmtOffset=0; // -6 for CST
+  int volume=DEFAULT_VOLUME;
   } conf;
 
 conf settings; //all settings in one struct makes it easier to store in EEPROM
@@ -289,7 +290,7 @@ void printDetail(uint8_t type, int value){
 void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length) 
   {
   static unsigned long noRepeat1=millis(); //these will be set to the current uptime counter plus 
-  static unsigned long noRepeat2=millis();
+  static unsigned long noRepeat2=millis(); // the delay time, to keep multiple alerts from occurring.
   static unsigned long noRepeat3=millis();
   static unsigned long noRepeat4=millis();
 
@@ -377,6 +378,9 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     strcat(settingsResp,"gmtOffset=");
     strcat(settingsResp,String(settings.gmtOffset).c_str());
     strcat(settingsResp,"\n");
+    strcat(settingsResp,"volume=");
+    strcat(settingsResp,String(settings.volume).c_str());
+    strcat(settingsResp,"\n");
     strcat(settingsResp,"debug=");
     strcat(settingsResp,settings.debug?"true":"false");
     strcat(settingsResp,"\n");
@@ -396,7 +400,7 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     strcpy(settingsResp,"Ready at ");
     strcat(settingsResp,WiFi.localIP().toString().c_str());
     response=settingsResp;
-    }   //check for beep requests
+    }   //check for target messages
   else if (strlen(settings.mqttMessage1)>0 
       && strcmp(charbuf,settings.mqttMessage1)==0
       && strcmp(reqTopic,settings.mqttTopic1)==0)
@@ -404,8 +408,6 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     if (millis()>noRepeat1)
       {
       show(settings.description1,true);
-//      beep(settings.soundPattern1);
-//      delay(1000);
       myDFPlayer.play(1);
       }
     noRepeat1=millis()+REPEAT_LIMIT_MS; //can't do it again for a few seconds
@@ -418,8 +420,6 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     if (millis()>noRepeat2)
       {
       show(settings.description2,true);
-//      beep(settings.soundPattern2);
-//      delay(1000);
       myDFPlayer.play(2);
       }
     noRepeat2=millis()+REPEAT_LIMIT_MS; //can't do it again for a few seconds
@@ -432,8 +432,6 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     if (millis()>noRepeat3)
       {
       show(settings.description3,true);
-//      beep(settings.soundPattern3);
-//      delay(1000);
       myDFPlayer.play(3);
       }
     noRepeat3=millis()+REPEAT_LIMIT_MS; //can't do it again for a few seconds
@@ -446,18 +444,18 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     if (millis()>noRepeat4)
       {
       show(settings.description4,true);
-      // beep(settings.soundPattern4);
-      // delay(1000);
       myDFPlayer.play(4);
       }
     noRepeat4=millis()+REPEAT_LIMIT_MS; //don't do it again for a few seconds
     response="OK";
     }
-  else if (strcmp(reqTopic,settings.commandTopic)==0 &&
-          processCommand(charbuf))
+  else if (strcmp(reqTopic,settings.commandTopic)==0)
     {
-    response="OK, restarting";
-    needRestart=true;
+    needRestart=processCommand(charbuf);
+    if (needRestart && settingsAreValid)
+      response="OK, restarting";
+    else
+      response="OK";
     }
   else
     {
@@ -477,7 +475,7 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
 
   if (needRestart)
     {
-    delay(1000);
+    delay(1000); //let all outgoing messages flush through
     ESP.restart();
     }
   }
@@ -511,6 +509,18 @@ boolean sendMessage(char* topic, char* value)
       Serial.println("************ Failed publishing "+String(topic)+"! ("+String(success)+")");
     }
   return success;
+  }
+
+
+/// @brief Converts a 0-10 range for volume to 0-30 and sends it to the DFPlayer.
+/// @param volume int
+void adjustVolume(int volume)
+  {
+  if (volume>=0 && volume<=10)
+    {
+    int vol=volume*3;
+    myDFPlayer.volume(vol);
+    }
   }
 
 void otaSetup()
@@ -689,7 +699,7 @@ void setup()
       myDFPlayer.setTimeOut(500); //Set serial communictaion time out 500ms
       myDFPlayer.EQ(DFPLAYER_EQ_NORMAL); //normal equalization
       myDFPlayer.outputDevice(DFPLAYER_DEVICE_SD); // it's really the input device (sd card)
-      myDFPlayer.volume(30);  //Set volume value (0~30).
+      adjustVolume(settings.volume);   //Set volume value (0~10).
 
       if (setupOK)
         show(const_cast<char*>("Startup complete"),true);
@@ -1012,6 +1022,9 @@ void showSettings()
   Serial.print("gmtOffset=<Time offset from GMT> (");
   Serial.print(settings.gmtOffset);
   Serial.println(")");
+  Serial.print("volume=<Speaker volume 0-10> (");
+  Serial.print(settings.volume);
+  Serial.println(")");
   Serial.print("debug=<print debug messages to serial port> (");
   Serial.print(settings.debug?"true":"false");
   Serial.println(")");
@@ -1040,6 +1053,9 @@ String getConfigCommand()
   else return "";
   }
 
+/// @brief Accepts a KV pair to change a setting or perform an action. Minimal input checking, be careful.
+/// @param cmd 
+/// @return true if a reset is needed to activate the change
 bool processCommand(String cmd)
   {
   const char *str=cmd.c_str();
@@ -1075,6 +1091,8 @@ bool processCommand(String cmd)
     Serial.print(val);
     Serial.println("\"\n");
     }
+
+  bool needRestart=true; //most changes will need a restart
 
   if (val==NULL)
     val=zero;
@@ -1211,11 +1229,25 @@ bool processCommand(String cmd)
     {
     settings.gmtOffset=atoi(val);
     saveSettings();
+    updateClock();
+    needRestart=false;
+    }
+  else if (strcmp(nme,"volume")==0)
+    {
+    settings.volume=atoi(val);
+    if (settings.volume>10) 
+      settings.volume=10;
+    if (settings.volume<0) 
+      settings.volume=0;
+    adjustVolume(settings.volume);
+    saveSettings();
+    needRestart=false;
     }
   else if (strcmp(nme,"debug")==0)
     {
     settings.debug=strcmp(val,"false")==0?false:true;
     saveSettings();
+    needRestart=false;
     }
   else if ((strcmp(nme,"factorydefaults")==0) && (strcmp(val,"yes")==0)) //reset all eeprom settings
     {
@@ -1234,9 +1266,9 @@ bool processCommand(String cmd)
   else
     {
     showSettings();
-    return false; //command not found
+    needRestart=false;
     }
-  return true;
+  return needRestart;
   }
 
 void initializeSettings()
@@ -1265,6 +1297,7 @@ void initializeSettings()
   generateMqttClientId(settings.mqttClientId);
   settings.debug=false;
   settings.gmtOffset=DEFAULT_GMT_OFFSET;
+  settings.volume=DEFAULT_VOLUME;
   saveSettings();
   }
 
@@ -1328,7 +1361,9 @@ boolean saveSettings()
     strlen(settings.mqttTopic4)<MQTT_MAX_TOPIC_SIZE &&
     strlen(settings.commandTopic)>0 &&
     strlen(settings.commandTopic)<MQTT_MAX_TOPIC_SIZE &&
-    settings.brokerPort>0 && settings.brokerPort<65535)
+    settings.brokerPort>0 && settings.brokerPort<65535 &&
+    settings.gmtOffset>-24 && settings.gmtOffset<24 &&
+    settings.volume>=0 && settings.volume<=10)
     {
     Serial.println("Settings deemed complete");
     settings.validConfig=VALID_SETTINGS_FLAG;

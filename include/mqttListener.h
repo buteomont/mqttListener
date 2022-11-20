@@ -9,8 +9,6 @@
 #define LED_OFF HIGH
 #define FLASHLED_ON HIGH
 #define FLASHLED_OFF LOW
-#define SOUNDER_ON HIGH
-#define SOUNDER_OFF LOW
 #define WIFI_CONNECTION_ATTEMPTS 150
 #define VALID_SETTINGS_FLAG 0xDAB0
 #define SSID_SIZE 100
@@ -32,7 +30,7 @@
 #define MQTT_TOPIC_COMMAND_REQUEST "command"
 #define DEFAULT_GMT_OFFSET -6
 #define REPEAT_LIMIT_MS 10000  //won't process repeated messages unless this much time between them
-
+#define DEFAULT_VOLUME 10 //all the way up
 
 //prototypes
 void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length);
