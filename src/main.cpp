@@ -11,6 +11,7 @@
  * **** a terminal and type "pio run -t erase"
  */ 
 #include <Arduino.h>
+#include <string.h>
 #include <PubSubClient.h> 
 #include <EEPROM.h>
 #include <pgmspace.h>
@@ -276,6 +277,64 @@ void printDetail(uint8_t type, int value){
 }
 
 
+/// @brief Compare two char strings, with allowances for '+' and '#'
+/// @param preciseTopic The incoming mqtt topic
+/// @param mqttTopic The stored topic, possibly with wildcard characters
+/// @return true if they match
+boolean mqttCompare(char* preciseTopic, char* mqttTopic)
+  {
+  char mTopic[MQTT_MAX_TOPIC_SIZE]; 
+  char pTopic[MQTT_MAX_TOPIC_SIZE];
+  char* mqttRest=mTopic;
+  char* preciseRest=pTopic;
+  char plus[]="+";
+  char pound[]="#";
+
+  strcpy(mTopic,mqttTopic); //must work on a copy, strtok_r messes it up
+  strcpy(pTopic,preciseTopic);
+  char* mqttParsed=strtok_r(mTopic,"/",&mqttRest);
+  char* preciseParsed=strtok_r(pTopic,"/",&preciseRest);
+  while (mqttParsed!=NULL || preciseParsed!=NULL)
+    {
+    if (settings.debug) 
+      {
+      Serial.print("Comparing part \"");
+      Serial.print(mqttParsed);
+      Serial.print("\" with \"");
+      Serial.print(preciseParsed);
+      Serial.print("\"...");
+      }
+    if (strcmp(mqttParsed,"#")==0)
+      {
+      if (settings.debug)
+        Serial.println("# found at end of topic, we're done.");
+      break; // # can only appear at the end of a topic. We're done.
+      }
+
+    else if (strcmp(mqttParsed,plus)!=0 && strcmp(mqttParsed,pound)!=0
+      && strcmp(preciseParsed,mqttParsed)!=0)
+      {
+      if (settings.debug)
+        Serial.println("Not a match.");
+      return false;
+      }
+    else if (settings.debug)
+      Serial.println("matched.");
+    mqttParsed=strtok_r(NULL,"/",&mqttRest);    //next segments
+    preciseParsed=strtok_r(NULL,"/",&preciseRest);
+    }
+  if (settings.debug)
+    {
+    Serial.print("\"");
+    Serial.print(preciseTopic);
+    Serial.print("\" matched against \"");
+    Serial.print(mqttTopic);
+    Serial.println("\".");
+    }
+  return true; //everything matched
+  }
+
+
 /**
  * Handler for incoming MQTT messages.  The payload is the command to perform. 
  * The MQTT response message topic sent is the incoming topic plus the command.
@@ -403,7 +462,7 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     }   //check for target messages
   else if (strlen(settings.mqttMessage1)>0 
       && strcmp(charbuf,settings.mqttMessage1)==0
-      && strcmp(reqTopic,settings.mqttTopic1)==0)
+      && mqttCompare(reqTopic,settings.mqttTopic1)==true)
     {
     if (millis()>noRepeat1)
       {
@@ -415,7 +474,7 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     }
   else if (strlen(settings.mqttMessage2)>0 
       && strcmp(charbuf,settings.mqttMessage2)==0
-      && strcmp(reqTopic,settings.mqttTopic2)==0)
+      && mqttCompare(reqTopic,settings.mqttTopic2)==true)
     {
     if (millis()>noRepeat2)
       {
@@ -427,7 +486,7 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     }
   else if (strlen(settings.mqttMessage3)>0 
       && strcmp(charbuf,settings.mqttMessage3)==0
-      && strcmp(reqTopic,settings.mqttTopic3)==0)
+      && mqttCompare(reqTopic,settings.mqttTopic3)==true)
     {
     if (millis()>noRepeat3)
       {
@@ -439,7 +498,7 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     }
   else if (strlen(settings.mqttMessage4)>0 
       && strcmp(charbuf,settings.mqttMessage4)==0
-      && strcmp(reqTopic,settings.mqttTopic4)==0)
+      && mqttCompare(reqTopic,settings.mqttTopic4)==true)
     {
     if (millis()>noRepeat4)
       {
@@ -470,8 +529,8 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
   strcat(topic,"/");
   strcat(topic,charbuf); //the incoming command becomes the topic suffix
 
-  if (!publish(topic,response,false)) //do not retain
-    Serial.println("************ Failure when publishing status response!");
+  // if (!publish(topic,response,false)) //do not retain
+  //   Serial.println("************ Failure when publishing status response!");
 
   if (needRestart)
     {
@@ -479,6 +538,7 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     ESP.restart();
     }
   }
+
 
 boolean sendMessage(char* topic, char* value)
   { 
