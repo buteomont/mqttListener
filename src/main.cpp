@@ -360,8 +360,9 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
   payload[length]='\0'; //this should have been done in the caller code, shouldn't have to do it here
   char charbuf[100];
   sprintf(charbuf,"%s",payload);
-  const char* response;
+  const char* response="\0";
   char settingsResp[1000];
+  settingsResp[0]='\0';
 
   if (settings.debug)
     {
@@ -377,6 +378,8 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
   if (strcmp(charbuf,"settings")==0 &&
       strcmp(reqTopic,settings.commandTopic)==0) //special case, send all settings
     {
+    if (settings.debug)
+      Serial.println("Sending settings...");
     strcpy(settingsResp,"\nssid=");
     strcat(settingsResp,settings.ssid);
     strcat(settingsResp,"\n");
@@ -470,7 +473,7 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
       myDFPlayer.play(1);
       }
     noRepeat1=millis()+REPEAT_LIMIT_MS; //can't do it again for a few seconds
-    response="OK";
+//    response="OK";
     }
   else if (strlen(settings.mqttMessage2)>0 
       && strcmp(charbuf,settings.mqttMessage2)==0
@@ -482,7 +485,7 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
       myDFPlayer.play(2);
       }
     noRepeat2=millis()+REPEAT_LIMIT_MS; //can't do it again for a few seconds
-    response="OK";
+//    response="OK";
     }
   else if (strlen(settings.mqttMessage3)>0 
       && strcmp(charbuf,settings.mqttMessage3)==0
@@ -494,7 +497,7 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
       myDFPlayer.play(3);
       }
     noRepeat3=millis()+REPEAT_LIMIT_MS; //can't do it again for a few seconds
-    response="OK";
+//    response="OK";
     }
   else if (strlen(settings.mqttMessage4)>0 
       && strcmp(charbuf,settings.mqttMessage4)==0
@@ -506,32 +509,33 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
       myDFPlayer.play(4);
       }
     noRepeat4=millis()+REPEAT_LIMIT_MS; //don't do it again for a few seconds
-    response="OK";
+//    response="OK";
     }
   else if (strcmp(reqTopic,settings.commandTopic)==0)
     {
     needRestart=processCommand(charbuf);
     if (needRestart && settingsAreValid)
       response="OK, restarting";
-    else
-      response="OK";
+//    else
+//      response="OK";
     }
   else
     {
-    char badCmd[18];
-    strcpy(badCmd,"(empty)");
-    response=badCmd;
+    // char badCmd[18];
+    // strcpy(badCmd,"(empty)");
+    // response=badCmd;
     }
 
   //prepare the response topic
-  char topic[MQTT_MAX_TOPIC_SIZE];
-  strcpy(topic,reqTopic);
-  strcat(topic,"/");
-  strcat(topic,charbuf); //the incoming command becomes the topic suffix
-
-  // if (!publish(topic,response,false)) //do not retain
-  //   Serial.println("************ Failure when publishing status response!");
-
+  if (response[0]!='\0')
+    { 
+    char topic[MQTT_MAX_TOPIC_SIZE];
+    strcpy(topic,reqTopic);
+    strcat(topic,"/");
+    strcat(topic,charbuf); //the incoming command becomes the topic suffix
+    if (!publish(topic,response,false)) //do not retain
+      Serial.println("************ Failure when publishing status response!");
+    }
   if (needRestart)
     {
     delay(1000); //let all outgoing messages flush through
@@ -762,7 +766,10 @@ void setup()
       adjustVolume(settings.volume);   //Set volume value (0~10).
 
       if (setupOK)
-        show(const_cast<char*>("Startup complete"),true);
+        {
+        show(const_cast<char*>(WiFi.localIP().toString().c_str()),false,true,0);
+        show(const_cast<char*>("Startup complete"),false,false,1);
+        }
       }
     }
   else
