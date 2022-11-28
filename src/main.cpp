@@ -464,8 +464,9 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     response=settingsResp;
     }   //check for target messages
   else if (strlen(settings.mqttMessage1)>0 
-      && strcmp(charbuf,settings.mqttMessage1)==0
-      && mqttCompare(reqTopic,settings.mqttTopic1)==true)
+      && mqttCompare(reqTopic,settings.mqttTopic1)==true
+      && (strcmp(charbuf,settings.mqttMessage1)==0 
+        || strcmp(settings.mqttMessage1,"*")==0))
     {
     if (millis()>noRepeat1)
       {
@@ -476,8 +477,9 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
 //    response="OK";
     }
   else if (strlen(settings.mqttMessage2)>0 
-      && strcmp(charbuf,settings.mqttMessage2)==0
-      && mqttCompare(reqTopic,settings.mqttTopic2)==true)
+      && mqttCompare(reqTopic,settings.mqttTopic2)==true
+      && (strcmp(charbuf,settings.mqttMessage2)==0 
+        || strcmp(settings.mqttMessage2,"*")==0))
     {
     if (millis()>noRepeat2)
       {
@@ -488,8 +490,9 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
 //    response="OK";
     }
   else if (strlen(settings.mqttMessage3)>0 
-      && strcmp(charbuf,settings.mqttMessage3)==0
-      && mqttCompare(reqTopic,settings.mqttTopic3)==true)
+      && mqttCompare(reqTopic,settings.mqttTopic3)==true
+      && (strcmp(charbuf,settings.mqttMessage3)==0 
+        || strcmp(settings.mqttMessage3,"*")==0))
     {
     if (millis()>noRepeat3)
       {
@@ -500,8 +503,9 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
 //    response="OK";
     }
   else if (strlen(settings.mqttMessage4)>0 
-      && strcmp(charbuf,settings.mqttMessage4)==0
-      && mqttCompare(reqTopic,settings.mqttTopic4)==true)
+      && mqttCompare(reqTopic,settings.mqttTopic4)==true
+      && (strcmp(charbuf,settings.mqttMessage4)==0 
+        || strcmp(settings.mqttMessage4,"*")==0))
     {
     if (millis()>noRepeat4)
       {
@@ -645,8 +649,6 @@ void setup()
 
   pinMode(LED_BUILTIN,OUTPUT);// The blue light on the board shows WiFi activity
   digitalWrite(LED_BUILTIN,LED_OFF);
-  //pinMode(SOUNDER_PORT,OUTPUT); // The port for the sounder device
-  //digitalWrite(SOUNDER_PORT,SOUNDER_OFF); //silence the sounder
   pinMode(FLASHLED_PORT,OUTPUT); // The port for the history LED
   digitalWrite(FLASHLED_PORT,FLASHLED_OFF); //turn off the LED until we receive a mqtt message
 
