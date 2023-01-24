@@ -1068,7 +1068,7 @@ void showSettings()
   Serial.print(settings.mqttTopic3);
   Serial.println(")");
   Serial.print("message3=<a message for topic 3> (");
-  Serial.print(settings.mqttMessage2);
+  Serial.print(settings.mqttMessage3);
   Serial.println(")");
   Serial.print("description3=<what to display when message3 is received> (");
   Serial.print(settings.description3);
