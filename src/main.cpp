@@ -1,9 +1,9 @@
 /*
- * Program to sound a buzzer with a pattern assigned to different mqtt messages.
+ * Program to play an audio message assigned to different mqtt messages.
  * By David E. Powell 
  *
  * Subscribes to an MQTT topic and when the target message is received, 
- * activates the sounder for a predermined pattern.
+ * activates the DF Robot DFPlayer Mini mp3 player and plays the associated sound.
  * 
  * Configuration is done via serial connection or by MQTT message.
  *  
@@ -72,6 +72,18 @@ conf settings; //all settings in one struct makes it easier to store in EEPROM
 boolean settingsAreValid=false;
 boolean setupOK=false;
 
+//This structure is for the in-memory message history.  It will vanish when the 
+//device is restarted. For now it only contains the topic number and the date code.
+//A future change may be to add the actual topic and message received.
+typedef struct
+  {
+  uint8 topicNumber=0;
+  unsigned long timestamp=0;
+  } histEntry;
+histEntry history[HISTORY_BUFFER_SIZE]; //circular buffer for histEntry objects
+uint8 histPointer=0;                    //points to next spot for history entry
+uint16 histEntryCount=0;                //contains the total number of history entries
+
 String commandString = "";     // a String to hold incoming commands from serial
 bool commandComplete = false;  // goes true when enter is pressed
 
@@ -126,6 +138,16 @@ void scrollDisplay()
   buf[DISPLAY_COLUMNS]='\0';
   show(buf,false,true,0);
   }
+
+void addHistoryEntry(uint8 topicNumber, unsigned long timestamp)
+  {
+  history[histPointer]={topicNumber,timestamp};
+  if (++histPointer >= HISTORY_BUFFER_SIZE)
+    histPointer=0; //circular buffer
+  if (++histEntryCount > HISTORY_BUFFER_SIZE)
+    histEntryCount=HISTORY_BUFFER_SIZE; //it's the max we can hold
+  }
+
 
 boolean refreshTime()
   {
@@ -334,6 +356,59 @@ boolean mqttCompare(char* preciseTopic, char* mqttTopic)
   return true; //everything matched
   }
 
+/*
+Convert the history buffer from a binary format to something that
+is readable by humans.  Parameter is a buffer that's big enough to
+hold all of the text that could be generated.
+*/
+void buildReadableHistory(char* buffer)
+  {
+  if (histEntryCount==0)
+    {
+    strcpy(buffer, "No history yet.");
+    }
+  else
+    {
+    char datebuff[32];
+    unsigned int tempPointer=0;
+    if (histEntryCount>=HISTORY_BUFFER_SIZE)
+      tempPointer=histPointer; //it's a circular buffer
+
+    strcpy(buffer,"");
+    for (int i=0;i<histEntryCount;i++)
+      {
+      unsigned long thisTime=history[tempPointer].timestamp;
+      sprintf(datebuff,"%02d/%02d %02d:%02d:%02d ",month(thisTime),day(thisTime),hour(thisTime),minute(thisTime),second(thisTime));
+      strcat(buffer,datebuff);
+
+      switch (history[tempPointer].topicNumber)
+        {
+        case 1:
+          strcat(buffer,settings.description1);
+          break;
+        
+        case 2:
+          strcat(buffer,settings.description2);
+          break;
+        
+        case 3:
+          strcat(buffer,settings.description3);
+          break;
+        
+        case 4:
+          strcat(buffer,settings.description4);
+          break;
+        
+        default:
+          strcat(buffer,"Unknown topic # ");
+          strcat(buffer,String(history[tempPointer].topicNumber).c_str());
+          break;
+        }
+      if (++tempPointer >= HISTORY_BUFFER_SIZE)
+        tempPointer=0; //circular buffer
+      }
+    }
+  }
 
 /**
  * Handler for incoming MQTT messages.  The payload is the command to perform. 
@@ -361,7 +436,14 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
   char charbuf[100];
   sprintf(charbuf,"%s",payload);
   const char* response="\0";
-  char settingsResp[1000];
+
+  //The array below was created as a buffer for the settings when responding by MQTT to the 
+  //"settings" command (hence the variable name). It is also used to report the history via
+  //MQTT, so the size was increased to what you see. It is static because it's too big for
+  //the stack and must reside in the heap. The size can be reduced if necessary by making
+  //the history buffer smaller.
+  static char settingsResp[(DISPLAY_COLUMNS+1)*DISPLAY_ROWS*HISTORY_BUFFER_SIZE];
+
   settingsResp[0]='\0';
 
   if (settings.debug)
@@ -456,6 +538,15 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     strcat(settingsResp,WiFi.localIP().toString().c_str());
     response=settingsResp;
     }
+  else if (strcmp(charbuf,"history")==0 &&
+      strcmp(reqTopic,settings.commandTopic)==0) //another special case, send message history
+    {
+    if (settings.debug)
+      Serial.println("Sending history...");
+    
+    buildReadableHistory(settingsResp);
+    response=settingsResp;
+    }
   else if (strcmp(charbuf,"status")==0 &&
       strcmp(reqTopic,settings.commandTopic)==0) //report that we're alive
     {
@@ -470,6 +561,7 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     {
     if (millis()>noRepeat1)
       {
+      addHistoryEntry(1,timeClient.getEpochTime());
       show(settings.description1,true);
       myDFPlayer.play(1);
       }
@@ -483,6 +575,7 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     {
     if (millis()>noRepeat2)
       {
+      addHistoryEntry(2,timeClient.getEpochTime());
       show(settings.description2,true);
       myDFPlayer.play(2);
       }
@@ -496,6 +589,7 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     {
     if (millis()>noRepeat3)
       {
+      addHistoryEntry(3,timeClient.getEpochTime());
       show(settings.description3,true);
       myDFPlayer.play(3);
       }
@@ -509,6 +603,7 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     {
     if (millis()>noRepeat4)
       {
+      addHistoryEntry(4,timeClient.getEpochTime());
       show(settings.description4,true);
       myDFPlayer.play(4);
       }
@@ -760,6 +855,8 @@ void setup()
           scrollDisplay();
           show(const_cast<char*>("MP3 player error"),true);
           setupOK=false;
+          delay(1000);
+          ESP.restart(); //try rebooting
           }
         }
       myDFPlayer.setTimeOut(500); //Set serial communictaion time out 500ms
