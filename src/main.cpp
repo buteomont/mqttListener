@@ -406,6 +406,8 @@ void buildReadableHistory(char* buffer)
         }
       if (++tempPointer >= HISTORY_BUFFER_SIZE)
         tempPointer=0; //circular buffer
+        
+      strcat(buffer,"\n");
       }
     }
   }
