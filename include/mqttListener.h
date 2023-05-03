@@ -32,6 +32,7 @@
 #define DEFAULT_GMT_OFFSET -6
 #define REPEAT_LIMIT_MS 10000  //won't process repeated messages unless this much time between them
 #define DEFAULT_VOLUME 10 //all the way up
+#define MQTT_BUFFER_SIZE (5+(DISPLAY_COLUMNS*DISPLAY_ROWS)+1)*HISTORY_BUFFER_SIZE
 
 //prototypes
 void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length);

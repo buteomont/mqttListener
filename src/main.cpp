@@ -365,7 +365,7 @@ void buildReadableHistory(char* buffer)
   {
   if (histEntryCount==0)
     {
-    strcpy(buffer, "No history yet.");
+    strcpy(buffer, "\nNo history yet.");
     }
   else
     {
@@ -378,7 +378,7 @@ void buildReadableHistory(char* buffer)
     for (int i=0;i<histEntryCount;i++)
       {
       unsigned long thisTime=history[tempPointer].timestamp;
-      sprintf(datebuff,"%02d/%02d %02d:%02d:%02d ",month(thisTime),day(thisTime),hour(thisTime),minute(thisTime),second(thisTime));
+      sprintf(datebuff,"\n%d. %02d/%02d %02d:%02d:%02d ",i+1,month(thisTime),day(thisTime),hour(thisTime),minute(thisTime),second(thisTime));
       strcat(buffer,datebuff);
 
       switch (history[tempPointer].topicNumber)
@@ -406,8 +406,6 @@ void buildReadableHistory(char* buffer)
         }
       if (++tempPointer >= HISTORY_BUFFER_SIZE)
         tempPointer=0; //circular buffer
-        
-      strcat(buffer,"\n");
       }
     }
   }
@@ -416,12 +414,12 @@ void buildReadableHistory(char* buffer)
  * Handler for incoming MQTT messages.  The payload is the command to perform. 
  * The MQTT response message topic sent is the incoming topic plus the command.
  * The incoming message should be one of mqttMessage1, mqttMessage2, mqttMessage3,
- * or one of the implemented commands.
+ * mqttMessage4, or one of the implemented commands.
  * 
  * Some of the devices that send these MQTT messages do so rapid-fire with repeats,
  * I guess just to make sure at least one gets through.  This code filters out all
- * but the first one, with at least 5 seconds required between one and the previous
- * for it to be announced.
+ * but the first one, with at least REPEAT_LIMIT_MS seconds required between one and
+ * the previous for it to be announced.
  */
 void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length) 
   {
@@ -437,14 +435,15 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
   payload[length]='\0'; //this should have been done in the caller code, shouldn't have to do it here
   char charbuf[100];
   sprintf(charbuf,"%s",payload);
-  const char* response="\0";
+  char zero[]="\0";
+  char* response=zero;
 
   //The array below was created as a buffer for the settings when responding by MQTT to the 
   //"settings" command (hence the variable name). It is also used to report the history via
   //MQTT, so the size was increased to what you see. It is static because it's too big for
   //the stack and must reside in the heap. The size can be reduced if necessary by making
   //the history buffer smaller.
-  static char settingsResp[(DISPLAY_COLUMNS+1)*DISPLAY_ROWS*HISTORY_BUFFER_SIZE];
+  static char settingsResp[MQTT_BUFFER_SIZE];
 
   settingsResp[0]='\0';
 
@@ -616,7 +615,10 @@ void incomingMqttHandler(char* reqTopic, byte* payload, unsigned int length)
     {
     needRestart=processCommand(charbuf);
     if (needRestart && settingsAreValid)
-      response="OK, restarting";
+      {
+      char tmp[]="OK, restarting";
+      response=tmp;
+      }
 //    else
 //      response="OK";
     }
@@ -868,6 +870,16 @@ void setup()
 
       if (setupOK)
         {
+        if (!mqttClient.setBufferSize(MQTT_BUFFER_SIZE)) //default (256) isn't big enough
+          {
+          show(const_cast<char*>("MQTT buffer size"),false,false,0);
+          show(const_cast<char*>("failure. OOM"),false,false,1);
+          setupOK=false;
+          }
+        }
+
+      if (setupOK)
+        {
         show(const_cast<char*>(WiFi.localIP().toString().c_str()),false,true,0);
         show(const_cast<char*>("Startup complete"),false,false,1);
         }
@@ -1005,7 +1017,7 @@ void mqttReconnect()
 
     Serial.print("Attempting MQTT connection...");
 
-    mqttClient.setBufferSize(1000); //default (256) isn't big enough
+    //mqttClient.setBufferSize(1000); //default (256) isn't big enough
     mqttClient.setServer(settings.brokerAddress, settings.brokerPort);
     mqttClient.setCallback(incomingMqttHandler);
     
