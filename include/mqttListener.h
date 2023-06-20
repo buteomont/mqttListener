@@ -46,7 +46,7 @@ void showSub(char* topic, bool subgood);
 void initializeSettings();
 void loadSettings();
 bool saveSettings();
-void serialEvent(); 
+void incomingData(); 
 void setup(); 
 void loop();
 

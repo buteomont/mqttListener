@@ -1483,7 +1483,7 @@ void initializeSettings()
 
 void checkForCommand()
   {
-  serialEvent();
+  incomingData();
   String cmd=getConfigCommand();
   if (cmd.length()>0)
     {
@@ -1584,8 +1584,10 @@ boolean saveSettings()
   SerialEvent occurs whenever a new data comes in the hardware serial RX. This
   routine is run between each time loop() runs, so using delay inside loop can
   delay response. Multiple bytes of data may be available.
+  This didn't work correctly when I first used it so I renamed the function to
+  incomingData() and the above statement no longer applies.
 */
-void serialEvent() 
+void incomingData() 
   {
   while (Serial.available()) 
     {
